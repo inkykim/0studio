@@ -15,4 +15,13 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  optimizeDeps: {
+    exclude: ["rhino3dm"],
+  },
+  build: {
+    rollupOptions: {
+      // Mark 'ws' as external since rhino3dm only needs it server-side
+      external: ["ws"],
+    },
+  },
 }));
