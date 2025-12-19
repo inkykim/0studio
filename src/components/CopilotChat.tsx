@@ -35,8 +35,6 @@ interface MessageAction {
 }
 
 const suggestions = [
-  { icon: Upload, text: "Import a 3DM file" },
-  { icon: Download, text: "Export to 3DM format" },
   { icon: Code, text: "Subdivide the mesh" },
   { icon: Lightbulb, text: "Add emission material" },
   { icon: Box, text: "Create primitive shapes" },
@@ -58,16 +56,8 @@ export const CopilotChat = () => {
     id: "1",
     role: "assistant",
     content:
-      "Hello! I'm your 3D modeling assistant. I can help you with:\n\n• **Import/Export**: Load and save Rhino .3dm files\n• Modifying geometry and materials\n• Optimizing mesh topology\n• Applying transformations\n• Generating procedural shapes\n\nDrag & drop a .3dm file onto the viewport or use the buttons below. What would you like to work on?",
+      "Hello! I'm your 3D modeling assistant. I can help you with:\n\n• **Import/Export**: Load and save Rhino .3dm files\n• Modifying geometry and materials\n• Optimizing mesh topology\n• Applying transformations\n• Generating procedural shapes\n\nDrag & drop a .3dm file onto the viewport. What would you like to work on?",
     timestamp: new Date(Date.now() - 60000),
-    actions: [
-      {
-        id: "import-initial",
-        label: "Import 3DM File",
-        icon: "import",
-        action: triggerFileDialog,
-      },
-    ],
   });
 
   const [messages, setMessages] = useState<Message[]>([getInitialMessage()]);
@@ -100,14 +90,8 @@ export const CopilotChat = () => {
     if (/import|load|open|upload/i.test(lowerInput)) {
       if (loadedModel) {
         return {
-          content: `You already have **${loadedModel.metadata.fileName}** loaded with ${loadedModel.metadata.objectCount} object(s).\n\nWould you like to:\n• Import a different file (replaces current)\n• Clear the current model first`,
+          content: `You already have **${loadedModel.metadata.fileName}** loaded with ${loadedModel.metadata.objectCount} object(s).\n\nWould you like to clear the current model? You can then drag & drop a new file onto the viewport.`,
           actions: [
-            {
-              id: "import-replace",
-              label: "Import New File",
-              icon: "import",
-              action: triggerFileDialog,
-            },
             {
               id: "clear-model",
               label: "Clear Current",
@@ -119,15 +103,7 @@ export const CopilotChat = () => {
       }
       return {
         content:
-          "Ready to import! Click the button below to select a Rhino .3dm file, or drag & drop directly onto the viewport.\n\n**Supported geometry:**\n• Meshes\n• NURBS surfaces (converted to mesh)\n• Curves\n• Points\n• Extrusions",
-        actions: [
-          {
-            id: "import-action",
-            label: "Select 3DM File",
-            icon: "import",
-            action: triggerFileDialog,
-          },
-        ],
+          "Ready to import! Drag & drop a Rhino .3dm file directly onto the viewport.\n\n**Supported geometry:**\n• Meshes\n• NURBS surfaces (converted to mesh)\n• Curves\n• Points\n• Extrusions",
       };
     }
 
@@ -136,15 +112,7 @@ export const CopilotChat = () => {
       if (stats.objects === 0) {
         return {
           content:
-            "There's nothing to export yet! Import a .3dm file or create some geometry first.\n\nThe default cube in the viewport is just a placeholder.",
-          actions: [
-            {
-              id: "import-for-export",
-              label: "Import a File",
-              icon: "import",
-              action: triggerFileDialog,
-            },
-          ],
+            "There's nothing to export yet! Drag & drop a .3dm file onto the viewport or create some geometry first.\n\nThe default cube in the viewport is just a placeholder.",
         };
       }
       return {
@@ -183,15 +151,7 @@ export const CopilotChat = () => {
         };
       }
       return {
-        content: `**Scene Statistics:**\n• Vertices: ${stats.vertices.toLocaleString()}\n• Faces: ${stats.faces.toLocaleString()}\n• Objects: ${stats.objects}\n\nNo file is currently loaded. Import a .3dm file to see file metadata.`,
-        actions: [
-          {
-            id: "import-info",
-            label: "Import File",
-            icon: "import",
-            action: triggerFileDialog,
-          },
-        ],
+        content: `**Scene Statistics:**\n• Vertices: ${stats.vertices.toLocaleString()}\n• Faces: ${stats.faces.toLocaleString()}\n• Objects: ${stats.objects}\n\nNo file is currently loaded. Drag & drop a .3dm file onto the viewport to see file metadata.`,
       };
     }
 
@@ -199,15 +159,9 @@ export const CopilotChat = () => {
     if (/rhino|rhinoceros|3dm/i.test(lowerInput)) {
       return {
         content:
-          "This viewer fully supports **Rhino 3D** files (.3dm format)!\n\n**Powered by:** Official rhino3dm library (OpenNURBS)\n\n**Import support:**\n• Meshes, BReps, Extrusions\n• Curves and Points\n• Object colors and names\n\n**Export support:**\n• Mesh geometry with colors\n• Compatible with Rhino 7+",
-        actions: [
-          {
-            id: "import-rhino",
-            label: "Import 3DM",
-            icon: "import",
-            action: triggerFileDialog,
-          },
-          ...(stats.objects > 0
+          "This viewer fully supports **Rhino 3D** files (.3dm format)!\n\n**Powered by:** Official rhino3dm library (OpenNURBS)\n\n**Import support:**\n• Meshes, BReps, Extrusions\n• Curves and Points\n• Object colors and names\n\n**Export support:**\n• Mesh geometry with colors\n• Compatible with Rhino 7+\n\nDrag & drop a .3dm file onto the viewport to get started!",
+        actions:
+          stats.objects > 0
             ? [
                 {
                   id: "export-rhino",
@@ -216,8 +170,7 @@ export const CopilotChat = () => {
                   action: () => exportScene(),
                 },
               ]
-            : []),
-        ],
+            : undefined,
       };
     }
 
@@ -282,15 +235,7 @@ export const CopilotChat = () => {
     if (/primitive|shape|cube|sphere|cylinder/i.test(lowerInput)) {
       return {
         content:
-          "Procedural shape generation is coming soon!\n\n**Planned primitives:**\n• Box, Sphere, Cylinder\n• Cone, Torus, Plane\n\nFor now, create shapes in Rhino and import them here.",
-        actions: [
-          {
-            id: "import-shapes",
-            label: "Import Shapes",
-            icon: "import",
-            action: triggerFileDialog,
-          },
-        ],
+          "Procedural shape generation is coming soon!\n\n**Planned primitives:**\n• Box, Sphere, Cylinder\n• Cone, Torus, Plane\n\nFor now, create shapes in Rhino and drag & drop them here.",
       };
     }
 
@@ -298,15 +243,9 @@ export const CopilotChat = () => {
     const defaults = [
       {
         content:
-          "I can help with Rhino .3dm file operations! Try asking about:\n\n• **Importing** - Load .3dm files\n• **Exporting** - Save your scene\n• **File info** - View statistics\n\nWhat would you like to do?",
-        actions: [
-          {
-            id: "import-default",
-            label: "Import File",
-            icon: "import" as const,
-            action: triggerFileDialog,
-          },
-          ...(stats.objects > 0
+          "I can help with Rhino .3dm file operations! Try asking about:\n\n• **Importing** - Drag & drop .3dm files onto the viewport\n• **Exporting** - Save your scene\n• **File info** - View statistics\n\nWhat would you like to do?",
+        actions:
+          stats.objects > 0
             ? [
                 {
                   id: "export-default",
@@ -315,8 +254,7 @@ export const CopilotChat = () => {
                   action: () => exportScene(),
                 },
               ]
-            : []),
-        ],
+            : undefined,
       },
     ];
 
