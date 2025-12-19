@@ -84,9 +84,19 @@ export async function load3dmFile(
     // Handle different geometry types
     const objectType = geometry.objectType;
     console.log(`Object ${i}: type ${objectType}, name: ${attributes?.name || 'unnamed'}`);
-
+    
+    // Log the actual geometry constructor name for debugging
+    const geometryType = geometry.constructor?.name;
+    console.log(`  Geometry constructor: ${geometryType}`);
+    
+    // Check if it's already a mesh
+    const isMesh = geometryType === 'Mesh' || 
+                   (geometry.vertices && geometry.faces) ||
+                   objectType === rhino.ObjectType.Mesh ||
+                   objectType === 32;
+    
     // Mesh (32 is ObjectType.Mesh in rhino3dm)
-    if (objectType === 32) {
+    if (isMesh) {
       console.log(`Processing Mesh ${i}`);
       const rhinoMesh = geometry;
       const threeMesh = rhinoMeshToThreeMesh(rhinoMesh, attributes, rhino);
@@ -99,36 +109,75 @@ export async function load3dmFile(
       }
     }
     // Brep (16 is ObjectType.Brep)
-    else if (objectType === 16) {
+    else if (geometryType === 'Brep' || objectType === rhino.ObjectType.Brep || objectType === 16) {
       console.log(`Processing Brep ${i}`);
-      // BReps need to be meshed first
+      // BReps need to be meshed - try multiple approaches
       const brep = geometry;
+      let meshed = false;
+      
+      // First, check if the Brep has render meshes attached
       try {
-        // Create a default mesh for the brep
-        const meshes = rhino.Mesh.createFromBrep(brep, rhino.MeshingParameters.default);
-        console.log(`Brep ${i} meshed into ${meshes?.length || 0} meshes`);
-        
-        if (meshes && meshes.length > 0) {
-          for (let j = 0; j < meshes.length; j++) {
-            const mesh = meshes[j];
-            const threeMesh = rhinoMeshToThreeMesh(mesh, attributes, rhino);
-            if (threeMesh) {
-              threeMesh.name = attributes.name || `Brep_${i}_${j}`;
-              objects.push(threeMesh);
-              console.log(`✓ Added brep mesh: ${threeMesh.name}`);
-            } else {
-              console.warn(`✗ Failed to convert brep mesh ${i}_${j}`);
-            }
+        const renderMesh = rhinoObject.getMesh?.(rhino.MeshType?.Render || 1);
+        if (renderMesh) {
+          const threeMesh = rhinoMeshToThreeMesh(renderMesh, attributes, rhino);
+          if (threeMesh) {
+            threeMesh.name = attributes.name || `Brep_${i}`;
+            objects.push(threeMesh);
+            console.log(`✓ Added brep render mesh: ${threeMesh.name}`);
+            meshed = true;
           }
-        } else {
-          console.warn(`Brep ${i} produced no meshes`);
         }
       } catch (e) {
-        console.warn(`Failed to mesh Brep ${i}:`, e);
+        console.log(`No render mesh on Brep ${i}`);
+      }
+      
+      // Try default mesh if render mesh didn't work
+      if (!meshed) {
+        try {
+          const defaultMesh = rhinoObject.getMesh?.(rhino.MeshType?.Default || 0);
+          if (defaultMesh) {
+            const threeMesh = rhinoMeshToThreeMesh(defaultMesh, attributes, rhino);
+            if (threeMesh) {
+              threeMesh.name = attributes.name || `Brep_${i}`;
+              objects.push(threeMesh);
+              console.log(`✓ Added brep default mesh: ${threeMesh.name}`);
+              meshed = true;
+            }
+          }
+        } catch (e) {
+          console.log(`No default mesh on Brep ${i}`);
+        }
+      }
+      
+      // Try createFromBrep as last resort (often fails in browser)
+      if (!meshed) {
+        try {
+          const meshes = rhino.Mesh?.createFromBrep?.(brep, rhino.MeshingParameters?.default);
+          console.log(`Brep ${i} meshed into ${meshes?.length || 0} meshes`);
+          
+          if (meshes && meshes.length > 0) {
+            for (let j = 0; j < meshes.length; j++) {
+              const mesh = meshes[j];
+              const threeMesh = rhinoMeshToThreeMesh(mesh, attributes, rhino);
+              if (threeMesh) {
+                threeMesh.name = attributes.name || `Brep_${i}_${j}`;
+                objects.push(threeMesh);
+                console.log(`✓ Added brep mesh: ${threeMesh.name}`);
+                meshed = true;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`createFromBrep failed for Brep ${i} (this is normal in browser - BREPs need server-side meshing):`, e);
+        }
+      }
+      
+      if (!meshed) {
+        console.warn(`⚠ Brep ${i} "${attributes?.name || 'unnamed'}" could not be meshed. Export your Rhino file with meshes included, or use a mesh-only format.`);
       }
     }
     // Extrusion (1073741824 is ObjectType.Extrusion)
-    else if (objectType === 1073741824) {
+    else if (geometryType === 'Extrusion' || objectType === rhino.ObjectType.Extrusion || objectType === 1073741824) {
       console.log(`Processing Extrusion ${i}`);
       const extrusion = geometry;
       try {
@@ -150,7 +199,7 @@ export async function load3dmFile(
       }
     }
     // Point (1 is ObjectType.Point)
-    else if (objectType === 1) {
+    else if (geometryType === 'Point' || objectType === rhino.ObjectType.Point || objectType === 1) {
       console.log(`Processing Point ${i}`);
       const point = geometry;
       const pointGeom = new THREE.SphereGeometry(0.05);
@@ -170,7 +219,7 @@ export async function load3dmFile(
       console.log(`✓ Added point: ${pointMesh.name}`);
     }
     // Curve (4 is ObjectType.Curve)
-    else if (objectType === 4) {
+    else if (geometryType === 'Curve' || geometryType === 'NurbsCurve' || objectType === rhino.ObjectType.Curve || objectType === 4) {
       console.log(`Processing Curve ${i}`);
       const curve = geometry;
       const lineMaterial = new THREE.LineBasicMaterial({
@@ -200,7 +249,38 @@ export async function load3dmFile(
         console.warn(`Curve ${i} produced insufficient points`);
       }
     } else {
-      console.warn(`Unsupported object type: ${objectType}`);
+      console.warn(`Unsupported object type: ${objectType}, constructor: ${geometryType}`);
+      
+      // Try a generic approach - attempt to convert to mesh if possible
+      try {
+        // Check if geometry has a method to convert to mesh
+        if (typeof geometry.getMesh === 'function') {
+          console.log(`Attempting getMesh() on ${geometryType}`);
+          const mesh = geometry.getMesh(rhino.MeshType?.Default || 0);
+          if (mesh) {
+            const threeMesh = rhinoMeshToThreeMesh(mesh, attributes, rhino);
+            if (threeMesh) {
+              threeMesh.name = attributes.name || `${geometryType}_${i}`;
+              objects.push(threeMesh);
+              console.log(`✓ Added via getMesh: ${threeMesh.name}`);
+            }
+          }
+        } else if (geometryType === 'SubD' || geometry.constructor?.name === 'SubD') {
+          // SubD (subdivision surface) - try to convert to mesh
+          console.log(`Converting SubD to mesh`);
+          const mesh = rhino.Mesh.createFromSubDControlNet(geometry);
+          if (mesh) {
+            const threeMesh = rhinoMeshToThreeMesh(mesh, attributes, rhino);
+            if (threeMesh) {
+              threeMesh.name = attributes.name || `SubD_${i}`;
+              objects.push(threeMesh);
+              console.log(`✓ Added SubD mesh: ${threeMesh.name}`);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn(`Failed to convert unknown geometry type:`, e);
+      }
     }
   }
 
@@ -211,6 +291,17 @@ export async function load3dmFile(
 
   if (objects.length === 0) {
     console.error("No objects were successfully converted to Three.js!");
+    console.log(`
+💡 TIP: If your file contains BREPs/Solids (not meshes), they cannot be 
+converted in the browser. To fix this:
+
+1. In Rhino, select all objects
+2. Run the 'Mesh' command to convert to meshes
+3. Save as a new .3dm file with the meshes
+4. Import that file instead
+
+Or export to a mesh format like OBJ or STL and convert to 3DM.
+    `);
   }
 
   const metadata: Rhino3dmMetadata = {
@@ -254,25 +345,73 @@ function rhinoMeshToThreeMesh(
     const positions: number[] = [];
     const indices: number[] = [];
 
-    // Extract vertices
+    // Extract vertices - handle both array and object access patterns
     for (let i = 0; i < vertexCount; i++) {
       const v = vertices.get(i);
       if (v) {
-        positions.push(v.x, v.y, v.z);
+        // Try different access patterns for vertex coordinates
+        let x, y, z;
+        
+        // Pattern 1: Direct properties
+        if (typeof v.x === 'number' && typeof v.y === 'number' && typeof v.z === 'number') {
+          x = v.x;
+          y = v.y;
+          z = v.z;
+        }
+        // Pattern 2: Array access
+        else if (Array.isArray(v) && v.length >= 3) {
+          x = v[0];
+          y = v[1];
+          z = v[2];
+        }
+        // Pattern 3: Indexed access
+        else if (typeof v[0] === 'number' && typeof v[1] === 'number' && typeof v[2] === 'number') {
+          x = v[0];
+          y = v[1];
+          z = v[2];
+        }
+        else {
+          console.warn(`Vertex ${i} has unexpected format:`, v);
+          x = 0;
+          y = 0;
+          z = 0;
+        }
+        
+        // Validate numbers
+        if (isNaN(x) || isNaN(y) || isNaN(z)) {
+          console.warn(`Vertex ${i} has NaN values: (${x}, ${y}, ${z})`);
+          x = 0;
+          y = 0;
+          z = 0;
+        }
+        
+        positions.push(x, y, z);
       }
     }
 
     console.log(`Extracted ${positions.length / 3} vertex positions`);
+    
+    // Log first few vertices for debugging
+    if (positions.length >= 9) {
+      console.log(`First vertex: (${positions[0]}, ${positions[1]}, ${positions[2]})`);
+      console.log(`Second vertex: (${positions[3]}, ${positions[4]}, ${positions[5]})`);
+      console.log(`Third vertex: (${positions[6]}, ${positions[7]}, ${positions[8]})`);
+    }
 
     // Extract faces
     for (let i = 0; i < faceCount; i++) {
       const face = faces.get(i);
       if (face) {
         // Rhino uses quads (a, b, c, d) where d === c means triangle
-        indices.push(face.a, face.b, face.c);
-        if (face.d !== face.c) {
+        const a = face.a || face[0] || 0;
+        const b = face.b || face[1] || 0;
+        const c = face.c || face[2] || 0;
+        const d = face.d || face[3] || c;
+        
+        indices.push(a, b, c);
+        if (d !== c) {
           // It's a quad, add second triangle
-          indices.push(face.a, face.c, face.d);
+          indices.push(a, c, d);
         }
       }
     }
@@ -291,12 +430,28 @@ function rhinoMeshToThreeMesh(
     );
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
+    
+    // Validate the geometry
+    geometry.computeBoundingBox();
+    if (geometry.boundingBox) {
+      console.log(`Geometry bounding box: min(${geometry.boundingBox.min.x.toFixed(2)}, ${geometry.boundingBox.min.y.toFixed(2)}, ${geometry.boundingBox.min.z.toFixed(2)}) max(${geometry.boundingBox.max.x.toFixed(2)}, ${geometry.boundingBox.max.y.toFixed(2)}, ${geometry.boundingBox.max.z.toFixed(2)})`);
+    }
 
+    // Get color from attributes or use a default visible color
+    const color = attributesToColor(attributes);
+    
+    // Ensure the material is visible - avoid pure black
+    const finalColor = new THREE.Color(color);
+    if (finalColor.r < 0.1 && finalColor.g < 0.1 && finalColor.b < 0.1) {
+      finalColor.setHex(0xcccccc); // Light gray default
+    }
+    
     const material = new THREE.MeshStandardMaterial({
-      color: attributesToColor(attributes),
-      metalness: 0.1,
-      roughness: 0.8,
+      color: finalColor,
+      metalness: 0.3,
+      roughness: 0.7,
       side: THREE.DoubleSide,
+      flatShading: false,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
@@ -313,11 +468,16 @@ function rhinoMeshToThreeMesh(
  * Convert Rhino object attributes to a Three.js color
  */
 function attributesToColor(attributes: any): THREE.Color {
-  if (attributes.objectColor) {
+  if (attributes?.objectColor) {
     const c = attributes.objectColor;
-    return new THREE.Color(c.r / 255, c.g / 255, c.b / 255);
+    const color = new THREE.Color(c.r / 255, c.g / 255, c.b / 255);
+    // If color is too dark, brighten it
+    if (color.r < 0.1 && color.g < 0.1 && color.b < 0.1) {
+      return new THREE.Color(0xcccccc); // Light gray
+    }
+    return color;
   }
-  return new THREE.Color(0xcccccc);
+  return new THREE.Color(0xcccccc); // Light gray default
 }
 
 /**

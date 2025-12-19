@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { OrbitControls, Grid } from "@react-three/drei";
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import {
@@ -31,13 +31,14 @@ function DefaultCube() {
   return (
     <mesh ref={meshRef}>
       <boxGeometry args={[2, 2, 2]} />
-      <meshStandardMaterial color="#ffffff" metalness={0.1} roughness={0.8} />
+      <meshStandardMaterial color="#888888" metalness={0.3} roughness={0.7} />
     </mesh>
   );
 }
 
 function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
   const groupRef = useRef<THREE.Group>(null);
+  const { camera, controls } = useThree();
 
   useEffect(() => {
     console.log(`LoadedObjects effect triggered with ${objects.length} objects`);
@@ -53,56 +54,115 @@ function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
       // Add new objects
       objects.forEach((obj, index) => {
         const clonedObj = obj.clone();
+        
+        // Make sure materials are visible
+        clonedObj.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            if (child.material) {
+              const mat = child.material as THREE.MeshStandardMaterial;
+              // Ensure material is not pure black
+              if (mat.color) {
+                const c = mat.color;
+                if (c.r < 0.1 && c.g < 0.1 && c.b < 0.1) {
+                  mat.color.setHex(0xaaaaaa);
+                  console.log(`Fixed black material on ${child.name}`);
+                }
+              }
+              mat.needsUpdate = true;
+            }
+          }
+        });
+        
         groupRef.current!.add(clonedObj);
         console.log(`Added object ${index}: ${obj.name || 'unnamed'}, type: ${obj.type}`);
       });
 
       console.log(`Total objects in group: ${groupRef.current.children.length}`);
 
-      // Center the group
+      // Reset position and scale first
+      groupRef.current.position.set(0, 0, 0);
+      groupRef.current.scale.set(1, 1, 1);
+      groupRef.current.rotation.set(0, 0, 0);
+
+      // Calculate bounding box
       const box = new THREE.Box3().setFromObject(groupRef.current);
       
       if (!box.isEmpty()) {
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         
+        console.log(`Bounding box - min: (${box.min.x.toFixed(2)}, ${box.min.y.toFixed(2)}, ${box.min.z.toFixed(2)})`);
+        console.log(`Bounding box - max: (${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`);
         console.log(`Bounding box - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
         console.log(`Bounding box - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
         
-        groupRef.current.position.sub(center);
+        // Move group so its center is at origin
+        groupRef.current.position.set(-center.x, -center.y, -center.z);
 
-        // Scale to fit
+        // Calculate optimal scale to fit in view (target size of 3 units)
         const maxDim = Math.max(size.x, size.y, size.z);
         console.log(`Max dimension: ${maxDim.toFixed(2)}`);
         
         if (maxDim > 0) {
-          if (maxDim > 4) {
-            const scale = 4 / maxDim;
-            groupRef.current.scale.setScalar(scale);
-            console.log(`Scaled by factor: ${scale.toFixed(3)}`);
-          } else if (maxDim < 0.1) {
-            // Scale up very small objects
-            const scale = 2 / maxDim;
-            groupRef.current.scale.setScalar(scale);
-            console.log(`Scaled up by factor: ${scale.toFixed(3)}`);
-          }
+          const targetSize = 3;
+          const scale = targetSize / maxDim;
+          groupRef.current.scale.setScalar(scale);
+          console.log(`Scaled by factor: ${scale.toFixed(6)}`);
+          console.log(`Final size: ${(maxDim * scale).toFixed(2)} units`);
         }
+
+        // Update controls to look at center
+        if (controls) {
+          controls.target.set(0, 0, 0);
+          controls.update();
+        }
+
+        // Position camera to view the object
+        const distance = Math.max(8, maxDim * 1.5);
+        camera.position.set(distance * 0.6, distance * 0.6, distance * 0.8);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+        
+        console.log(`Camera positioned at: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
       } else {
         console.warn("Bounding box is empty!");
       }
       
-      console.log("Objects successfully added to scene");
+      console.log("Objects successfully added and centered");
     } else {
       console.log("No objects to display or group ref not ready");
     }
-  }, [objects]);
+  }, [objects, camera, controls]);
 
-  return <group ref={groupRef} />;
+  return (
+    <group ref={groupRef}>
+      {/* Add a small sphere at origin for debugging */}
+      {objects.length > 0 && (
+        <mesh position={[0, 0, 0]}>
+          <sphereGeometry args={[0.1, 16, 16]} />
+          <meshBasicMaterial color="#ff0000" />
+        </mesh>
+      )}
+    </group>
+  );
 }
 
 function GridFloor() {
   return (
-    <gridHelper args={[20, 20, "#333333", "#222222"]} position={[0, -2, 0]} />
+    <Grid
+      args={[100, 100]}
+      cellSize={1}
+      cellThickness={0.6}
+      cellColor="#555555"
+      sectionSize={10}
+      sectionThickness={1.2}
+      sectionColor="#888888"
+      fadeDistance={80}
+      fadeStrength={1}
+      followCamera={false}
+      infiniteGrid={true}
+      position={[0, -0.01, 0]}
+    />
   );
 }
 
@@ -359,22 +419,32 @@ export const ModelViewer = () => {
           )}
 
           <Canvas
-            camera={{ position: [0, 0, 6], fov: 50 }}
+            camera={{ position: [5, 5, 8], fov: 50 }}
             dpr={[1, 2]}
             gl={{ antialias: true, alpha: true }}
           >
-            <color attach="background" args={["#000000"]} />
+            <color attach="background" args={["#0a0a0a"]} />
 
-            <ambientLight intensity={0.3} />
+            {/* Much brighter lighting */}
+            <ambientLight intensity={0.8} />
             <directionalLight
-              position={[5, 5, 5]}
-              intensity={1}
+              position={[10, 10, 10]}
+              intensity={1.5}
+              color="#ffffff"
+              castShadow
+            />
+            <directionalLight
+              position={[-10, -5, -10]}
+              intensity={0.8}
               color="#ffffff"
             />
             <directionalLight
-              position={[-5, -5, -5]}
-              intensity={0.3}
+              position={[0, -10, 0]}
+              intensity={0.5}
               color="#ffffff"
+            />
+            <hemisphereLight
+              args={["#ffffff", "#444444", 0.6]}
             />
 
             <SceneContent onSceneReady={handleSceneReady} />
@@ -383,8 +453,10 @@ export const ModelViewer = () => {
               enablePan={true}
               enableZoom={true}
               enableRotate={true}
-              minDistance={3}
-              maxDistance={15}
+              enableDamping={true}
+              dampingFactor={0.05}
+              minDistance={0.5}
+              maxDistance={200}
               target={[0, 0, 0]}
               makeDefault
             />
