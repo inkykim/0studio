@@ -43,10 +43,13 @@ export async function initRhino3dm(): Promise<any> {
 export async function load3dmFile(
   file: File
 ): Promise<{ objects: THREE.Object3D[]; metadata: Rhino3dmMetadata }> {
+  console.log(`Starting to load 3DM file: ${file.name}`);
   const rhino = await initRhino3dm();
+  console.log("Rhino3dm module initialized");
 
   const buffer = await file.arrayBuffer();
   const uint8Array = new Uint8Array(buffer);
+  console.log(`File loaded: ${uint8Array.length} bytes`);
 
   // Create a File3dm from the buffer
   const doc = rhino.File3dm.fromByteArray(uint8Array);
@@ -55,57 +58,100 @@ export async function load3dmFile(
     throw new Error("Failed to parse 3DM file");
   }
 
+  console.log("File3dm document created successfully");
+
   const objects: THREE.Object3D[] = [];
   const objectCount = doc.objects().count;
 
+  console.log(`Loading 3DM file with ${objectCount} objects`);
+
   for (let i = 0; i < objectCount; i++) {
     const rhinoObject = doc.objects().get(i);
+    
+    if (!rhinoObject) {
+      console.warn(`Object ${i}: Failed to get object`);
+      continue;
+    }
+
     const geometry = rhinoObject.geometry();
     const attributes = rhinoObject.attributes();
 
+    if (!geometry) {
+      console.warn(`Object ${i}: No geometry`);
+      continue;
+    }
+
     // Handle different geometry types
     const objectType = geometry.objectType;
+    console.log(`Object ${i}: type ${objectType}, name: ${attributes?.name || 'unnamed'}`);
 
     // Mesh (32 is ObjectType.Mesh in rhino3dm)
     if (objectType === 32) {
+      console.log(`Processing Mesh ${i}`);
       const rhinoMesh = geometry;
-      const threeMesh = rhinoMeshToThreeMesh(rhinoMesh, attributes);
+      const threeMesh = rhinoMeshToThreeMesh(rhinoMesh, attributes, rhino);
       if (threeMesh) {
-        threeMesh.name = attributes.name || `Object_${i}`;
+        threeMesh.name = attributes.name || `Mesh_${i}`;
         objects.push(threeMesh);
+        console.log(`✓ Added mesh: ${threeMesh.name}`);
+      } else {
+        console.warn(`✗ Failed to convert mesh ${i}`);
       }
     }
     // Brep (16 is ObjectType.Brep)
     else if (objectType === 16) {
+      console.log(`Processing Brep ${i}`);
       // BReps need to be meshed first
       const brep = geometry;
-      if (brep.faces && typeof brep.faces === "function") {
-        const meshes = rhino.MeshObjects.fromBrep(brep, {});
-        for (const mesh of meshes) {
-          const threeMesh = rhinoMeshToThreeMesh(mesh, attributes);
-          if (threeMesh) {
-            threeMesh.name = attributes.name || `Brep_${i}`;
-            objects.push(threeMesh);
+      try {
+        // Create a default mesh for the brep
+        const meshes = rhino.Mesh.createFromBrep(brep, rhino.MeshingParameters.default);
+        console.log(`Brep ${i} meshed into ${meshes?.length || 0} meshes`);
+        
+        if (meshes && meshes.length > 0) {
+          for (let j = 0; j < meshes.length; j++) {
+            const mesh = meshes[j];
+            const threeMesh = rhinoMeshToThreeMesh(mesh, attributes, rhino);
+            if (threeMesh) {
+              threeMesh.name = attributes.name || `Brep_${i}_${j}`;
+              objects.push(threeMesh);
+              console.log(`✓ Added brep mesh: ${threeMesh.name}`);
+            } else {
+              console.warn(`✗ Failed to convert brep mesh ${i}_${j}`);
+            }
           }
+        } else {
+          console.warn(`Brep ${i} produced no meshes`);
         }
+      } catch (e) {
+        console.warn(`Failed to mesh Brep ${i}:`, e);
       }
     }
     // Extrusion (1073741824 is ObjectType.Extrusion)
     else if (objectType === 1073741824) {
+      console.log(`Processing Extrusion ${i}`);
       const extrusion = geometry;
-      if (extrusion.toMesh) {
-        const mesh = extrusion.toMesh(true);
+      try {
+        const mesh = extrusion.getMesh(rhino.MeshType.Default);
         if (mesh) {
-          const threeMesh = rhinoMeshToThreeMesh(mesh, attributes);
+          const threeMesh = rhinoMeshToThreeMesh(mesh, attributes, rhino);
           if (threeMesh) {
             threeMesh.name = attributes.name || `Extrusion_${i}`;
             objects.push(threeMesh);
+            console.log(`✓ Added extrusion: ${threeMesh.name}`);
+          } else {
+            console.warn(`✗ Failed to convert extrusion ${i}`);
           }
+        } else {
+          console.warn(`Extrusion ${i} produced no mesh`);
         }
+      } catch (e) {
+        console.warn(`Failed to mesh Extrusion ${i}:`, e);
       }
     }
     // Point (1 is ObjectType.Point)
     else if (objectType === 1) {
+      console.log(`Processing Point ${i}`);
       const point = geometry;
       const pointGeom = new THREE.SphereGeometry(0.05);
       const pointMat = new THREE.MeshStandardMaterial({
@@ -121,9 +167,11 @@ export async function load3dmFile(
       }
       pointMesh.name = attributes.name || `Point_${i}`;
       objects.push(pointMesh);
+      console.log(`✓ Added point: ${pointMesh.name}`);
     }
     // Curve (4 is ObjectType.Curve)
     else if (objectType === 4) {
+      console.log(`Processing Curve ${i}`);
       const curve = geometry;
       const lineMaterial = new THREE.LineBasicMaterial({
         color: attributesToColor(attributes),
@@ -147,12 +195,26 @@ export async function load3dmFile(
         const line = new THREE.Line(lineGeom, lineMaterial);
         line.name = attributes.name || `Curve_${i}`;
         objects.push(line);
+        console.log(`✓ Added curve: ${line.name} with ${points.length} points`);
+      } else {
+        console.warn(`Curve ${i} produced insufficient points`);
       }
+    } else {
+      console.warn(`Unsupported object type: ${objectType}`);
     }
   }
 
+  console.log(`\n=== SUMMARY ===`);
+  console.log(`Total objects in file: ${objectCount}`);
+  console.log(`Total objects converted: ${objects.length}`);
+  console.log(`===============\n`);
+
+  if (objects.length === 0) {
+    console.error("No objects were successfully converted to Three.js!");
+  }
+
   const metadata: Rhino3dmMetadata = {
-    objectCount,
+    objectCount: objects.length,
     fileName: file.name,
     fileSize: file.size,
   };
@@ -167,13 +229,25 @@ export async function load3dmFile(
  */
 function rhinoMeshToThreeMesh(
   rhinoMesh: any,
-  attributes: any
+  attributes: any,
+  rhino: any
 ): THREE.Mesh | null {
   try {
     const vertices = rhinoMesh.vertices();
     const faces = rhinoMesh.faces();
 
-    if (vertices.count === 0 || faces.count === 0) {
+    if (!vertices || !faces) {
+      console.warn("Mesh has no vertices or faces accessor");
+      return null;
+    }
+
+    const vertexCount = vertices.count;
+    const faceCount = faces.count;
+
+    console.log(`Converting mesh with ${vertexCount} vertices and ${faceCount} faces`);
+
+    if (vertexCount === 0 || faceCount === 0) {
+      console.warn("Mesh has 0 vertices or 0 faces");
       return null;
     }
 
@@ -181,20 +255,33 @@ function rhinoMeshToThreeMesh(
     const indices: number[] = [];
 
     // Extract vertices
-    for (let i = 0; i < vertices.count; i++) {
+    for (let i = 0; i < vertexCount; i++) {
       const v = vertices.get(i);
-      positions.push(v.x, v.y, v.z);
+      if (v) {
+        positions.push(v.x, v.y, v.z);
+      }
     }
 
+    console.log(`Extracted ${positions.length / 3} vertex positions`);
+
     // Extract faces
-    for (let i = 0; i < faces.count; i++) {
+    for (let i = 0; i < faceCount; i++) {
       const face = faces.get(i);
-      // Rhino uses quads (a, b, c, d) where d === c means triangle
-      indices.push(face.a, face.b, face.c);
-      if (face.d !== face.c) {
-        // It's a quad, add second triangle
-        indices.push(face.a, face.c, face.d);
+      if (face) {
+        // Rhino uses quads (a, b, c, d) where d === c means triangle
+        indices.push(face.a, face.b, face.c);
+        if (face.d !== face.c) {
+          // It's a quad, add second triangle
+          indices.push(face.a, face.c, face.d);
+        }
       }
+    }
+
+    console.log(`Extracted ${indices.length / 3} triangles`);
+
+    if (positions.length === 0 || indices.length === 0) {
+      console.warn("No positions or indices extracted from mesh");
+      return null;
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -212,7 +299,10 @@ function rhinoMeshToThreeMesh(
       side: THREE.DoubleSide,
     });
 
-    return new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(geometry, material);
+    console.log(`Successfully created Three.js mesh`);
+    
+    return mesh;
   } catch (error) {
     console.error("Error converting Rhino mesh:", error);
     return null;

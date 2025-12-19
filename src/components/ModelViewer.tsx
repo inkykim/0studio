@@ -40,29 +40,60 @@ function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
   const groupRef = useRef<THREE.Group>(null);
 
   useEffect(() => {
+    console.log(`LoadedObjects effect triggered with ${objects.length} objects`);
+    
     if (groupRef.current && objects.length > 0) {
       // Clear existing children
       while (groupRef.current.children.length > 0) {
         groupRef.current.remove(groupRef.current.children[0]);
       }
 
+      console.log("Adding objects to scene...");
+      
       // Add new objects
-      objects.forEach((obj) => {
-        groupRef.current!.add(obj.clone());
+      objects.forEach((obj, index) => {
+        const clonedObj = obj.clone();
+        groupRef.current!.add(clonedObj);
+        console.log(`Added object ${index}: ${obj.name || 'unnamed'}, type: ${obj.type}`);
       });
+
+      console.log(`Total objects in group: ${groupRef.current.children.length}`);
 
       // Center the group
       const box = new THREE.Box3().setFromObject(groupRef.current);
-      const center = box.getCenter(new THREE.Vector3());
-      groupRef.current.position.sub(center);
+      
+      if (!box.isEmpty()) {
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        
+        console.log(`Bounding box - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+        console.log(`Bounding box - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
+        
+        groupRef.current.position.sub(center);
 
-      // Scale to fit
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-      if (maxDim > 4) {
-        const scale = 4 / maxDim;
-        groupRef.current.scale.setScalar(scale);
+        // Scale to fit
+        const maxDim = Math.max(size.x, size.y, size.z);
+        console.log(`Max dimension: ${maxDim.toFixed(2)}`);
+        
+        if (maxDim > 0) {
+          if (maxDim > 4) {
+            const scale = 4 / maxDim;
+            groupRef.current.scale.setScalar(scale);
+            console.log(`Scaled by factor: ${scale.toFixed(3)}`);
+          } else if (maxDim < 0.1) {
+            // Scale up very small objects
+            const scale = 2 / maxDim;
+            groupRef.current.scale.setScalar(scale);
+            console.log(`Scaled up by factor: ${scale.toFixed(3)}`);
+          }
+        }
+      } else {
+        console.warn("Bounding box is empty!");
       }
+      
+      console.log("Objects successfully added to scene");
+    } else {
+      console.log("No objects to display or group ref not ready");
     }
   }, [objects]);
 
