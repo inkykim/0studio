@@ -270,8 +270,7 @@ export async function exportTo3dm(
   });
 
   // Convert to byte array and trigger download
-  const options = new rhino.File3dmWriteOptions();
-  const buffer = doc.toByteArray(options);
+  const buffer = doc.toByteArray();
 
   // Create a proper ArrayBuffer copy for Blob
   const arrayBuffer = new ArrayBuffer(buffer.length);
@@ -317,23 +316,24 @@ function threeMeshToRhinoMesh(rhino: any, threeMesh: THREE.Mesh): any | null {
       rhinoMesh.vertices().add(tempVector.x, tempVector.y, tempVector.z);
     }
 
-    // Add faces
+    // Add faces using addTriFace (correct API for rhino3dm v8+)
     if (geometry.index) {
       const indices = geometry.index;
       for (let i = 0; i < indices.count; i += 3) {
         rhinoMesh
           .faces()
-          .addFace(indices.getX(i), indices.getX(i + 1), indices.getX(i + 2));
+          .addTriFace(indices.getX(i), indices.getX(i + 1), indices.getX(i + 2));
       }
     } else {
       // Non-indexed geometry
       for (let i = 0; i < positions.count; i += 3) {
-        rhinoMesh.faces().addFace(i, i + 1, i + 2);
+        rhinoMesh.faces().addTriFace(i, i + 1, i + 2);
       }
     }
 
     // Compute normals
-    rhinoMesh.compute();
+    rhinoMesh.normals().computeNormals();
+    rhinoMesh.compact();
 
     return rhinoMesh;
   } catch (error) {
