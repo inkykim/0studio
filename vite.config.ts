@@ -13,9 +13,12 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Use the ES module version of rhino3dm for better Vite compatibility
+      "rhino3dm": path.resolve(__dirname, "./node_modules/rhino3dm/rhino3dm.module.js"),
     },
   },
   optimizeDeps: {
+    // Exclude rhino3dm from pre-bundling as it has WASM
     exclude: ["rhino3dm"],
   },
   build: {

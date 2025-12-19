@@ -15,9 +15,22 @@ export async function initRhino3dm(): Promise<any> {
   if (rhinoInitPromise) return rhinoInitPromise;
 
   rhinoInitPromise = (async () => {
-    // Dynamic import of rhino3dm
-    const rhino3dm = await import("rhino3dm");
-    rhinoModule = await rhino3dm.default();
+    // Dynamic import of rhino3dm - handle both ESM and CJS exports
+    const rhino3dmModule = await import("rhino3dm");
+    
+    // rhino3dm exports a factory function that returns a promise
+    // Handle both default export and named export patterns
+    const factory = rhino3dmModule.default || rhino3dmModule;
+    
+    if (typeof factory === "function") {
+      rhinoModule = await factory();
+    } else if (typeof factory === "object" && factory !== null) {
+      // Already initialized module
+      rhinoModule = factory;
+    } else {
+      throw new Error("Failed to load rhino3dm module");
+    }
+    
     return rhinoModule;
   })();
 
@@ -228,8 +241,7 @@ export async function exportTo3dm(
 
   const doc = new rhino.File3dm();
 
-  // Add a note about the export
-  doc.strings().setModelNotes("Exported from 0studio", false);
+  // Note: model notes API varies by version, skip for compatibility
 
   // Traverse the scene and convert meshes
   scene.traverse((child) => {
