@@ -350,7 +350,7 @@ function CameraRotation() {
     const currentAngle = Math.atan2(camera.position.z, camera.position.x);
     
     // Rotate around Y axis
-    const newAngle = currentAngle + delta * 0.05; // 0.05 rad/sec rotation speed
+    const newAngle = currentAngle + delta * 0.00; // 0.05 rad/sec rotation speed
     
     // Update camera position maintaining the same distance and Y position
     camera.position.x = radius * Math.cos(newAngle);
