@@ -182,8 +182,8 @@ function GridFloor() {
       cellThickness={0.6}
       cellColor="#555555"
       sectionSize={10}
-      sectionThickness={1.2}
-      sectionColor="#888888"
+      sectionThickness={0.8}
+      sectionColor="#555555"
       fadeDistance={80}
       fadeStrength={1}
       followCamera={false}
@@ -294,7 +294,6 @@ function SceneContent({
     <>
       {loadedModel && <LoadedObjects objects={loadedModel.objects} />}
       {generatedObjects.length > 0 && <GeneratedObjects objects={generatedObjects} />}
-      {!hasContent && <DefaultCube />}
       <GridFloor />
       <SceneStatsCalculator 
         onStatsUpdate={setStats} 
@@ -489,11 +488,11 @@ export const ModelViewer = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 onClick={clearHistory}
                 disabled={commits.length === 0}
-                className="gap-2 text-muted-foreground hover:text-destructive"
+                className="gap-2"
               >
                 <Trash2 className="w-4 h-4" />
                 <span className="hidden sm:inline">Clear History</span>
@@ -621,7 +620,7 @@ export const ModelViewer = () => {
           {/* Controls hint */}
           <div className="absolute bottom-4 right-4 text-code text-xs text-muted-foreground">
             <span className="opacity-60">
-              Drag to rotate / Scroll to zoom / Drop .3dm to import
+              Drag to rotate / Scroll to zoom
             </span>
           </div>
         </div>

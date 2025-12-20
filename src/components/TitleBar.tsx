@@ -14,7 +14,7 @@ export const TitleBar = () => {
       {/* title */}
       <div className="flex-1 flex items-center justify-center">
         <span className="text-sm font-medium text-muted-foreground">0studio</span>
-        <span className="text-xs text-muted-foreground/60 ml-2">cube.3dm</span>
+        <span className="text-xs text-muted-foreground/60 ml-2">demo.3dm</span>
       </div>
 
       {/* spacer for symmetry */}
