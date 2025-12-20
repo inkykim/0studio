@@ -30,6 +30,9 @@ function DefaultCube() {
 function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
   const groupRef = useRef<THREE.Group>(null);
   const { camera, controls } = useThree();
+  
+  // Cast controls to access OrbitControls methods (drei's OrbitControls sets this)
+  const orbitControls = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
 
   useEffect(() => {
     console.log(`LoadedObjects effect triggered with ${objects.length} objects`);
@@ -103,9 +106,9 @@ function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
         }
 
         // Update controls to look at center
-        if (controls) {
-          controls.target.set(0, 0, 0);
-          controls.update();
+        if (orbitControls) {
+          orbitControls.target.set(0, 0, 0);
+          orbitControls.update();
         }
 
         // Position camera to view the object
@@ -149,48 +152,56 @@ function GridFloor() {
 
 function SceneStatsCalculator({
   onStatsUpdate,
+  modelObjects,
 }: {
   onStatsUpdate: (stats: SceneStats) => void;
+  modelObjects: THREE.Object3D[] | null;
 }) {
-  const { scene } = useThree();
-
   useEffect(() => {
     const calculateStats = () => {
       let vertices = 0;
       let faces = 0;
       let objects = 0;
 
-      scene.traverse((child) => {
-        if (
-          child instanceof THREE.Mesh &&
-          child.geometry &&
-          !(child instanceof THREE.GridHelper)
-        ) {
-          objects++;
+      // Only count objects from the loaded model
+      if (modelObjects && modelObjects.length > 0) {
+        const meshDetails: string[] = [];
+        
+        modelObjects.forEach((obj) => {
+          obj.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.geometry) {
+              objects++;
+              const geometry = child.geometry;
+              const vCount = geometry.attributes.position?.count || 0;
+              let fCount = 0;
 
-          const geometry = child.geometry;
+              if (geometry.index) {
+                fCount = geometry.index.count / 3;
+              } else if (geometry.attributes.position) {
+                fCount = geometry.attributes.position.count / 3;
+              }
 
-          if (geometry.attributes.position) {
-            vertices += geometry.attributes.position.count;
-          }
-
-          if (geometry.index) {
-            faces += geometry.index.count / 3;
-          } else if (geometry.attributes.position) {
-            faces += geometry.attributes.position.count / 3;
-          }
+              vertices += vCount;
+              faces += fCount;
+              
+              meshDetails.push(`${child.name || 'unnamed'}: ${vCount}v, ${fCount}f`);
+            }
+          });
+        });
+        
+        // Log once when model changes
+        if (meshDetails.length > 0) {
+          console.log("Model breakdown:", meshDetails);
         }
-      });
+      }
 
       onStatsUpdate({ vertices, faces, objects });
     };
 
     calculateStats();
-
-    const interval = setInterval(calculateStats, 1000);
-
-    return () => clearInterval(interval);
-  }, [scene, onStatsUpdate]);
+    
+    // Only recalculate on model change, not on interval
+  }, [modelObjects, onStatsUpdate]);
 
   return null;
 }
@@ -216,7 +227,10 @@ function SceneContent({
         <DefaultCube />
       )}
       <GridFloor />
-      <SceneStatsCalculator onStatsUpdate={setStats} />
+      <SceneStatsCalculator 
+        onStatsUpdate={setStats} 
+        modelObjects={loadedModel?.objects || null}
+      />
     </>
   );
 }
