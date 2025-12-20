@@ -92,6 +92,9 @@ function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
       groupRef.current.scale.set(1, 1, 1);
       groupRef.current.rotation.set(0, 0, 0);
 
+      // Force update the matrix before calculating bounding box
+      groupRef.current.updateMatrixWorld(true);
+
       // Calculate bounding box
       const box = new THREE.Box3().setFromObject(groupRef.current);
       
@@ -99,13 +102,23 @@ function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         
+        console.log(`File: ${objects[0]?.userData?.fileName || 'Unknown'}`);
         console.log(`Bounding box - min: (${box.min.x.toFixed(2)}, ${box.min.y.toFixed(2)}, ${box.min.z.toFixed(2)})`);
         console.log(`Bounding box - max: (${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`);
         console.log(`Bounding box - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
         console.log(`Bounding box - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
         
-        // Move group so its center is at origin
+        // Move group so its center is at origin - ensure we're using the correct center
+        console.log(`Moving group by: (${(-center.x).toFixed(2)}, ${(-center.y).toFixed(2)}, ${(-center.z).toFixed(2)})`);
         groupRef.current.position.set(-center.x, -center.y, -center.z);
+        
+        // Force another matrix update after positioning
+        groupRef.current.updateMatrixWorld(true);
+        
+        // Verify the centering worked by recalculating the bounding box
+        const verifyBox = new THREE.Box3().setFromObject(groupRef.current);
+        const verifyCenter = verifyBox.getCenter(new THREE.Vector3());
+        console.log(`After centering - new center: (${verifyCenter.x.toFixed(2)}, ${verifyCenter.y.toFixed(2)}, ${verifyCenter.z.toFixed(2)})`);
 
         // Calculate optimal scale to fit in view (target size of 3 units)
         const maxDim = Math.max(size.x, size.y, size.z);
@@ -147,9 +160,15 @@ function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
 
 function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
   const groupRef = useRef<THREE.Group>(null);
+  const { camera, controls } = useThree();
+  
+  // Cast controls to access OrbitControls methods
+  const orbitControls = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
   
   useEffect(() => {
     if (!groupRef.current) return;
+    
+    console.log(`GeneratedObjects effect triggered with ${objects.length} objects`);
     
     // Clear existing children
     while (groupRef.current.children.length > 0) {
@@ -157,9 +176,55 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
     }
     
     // Add all generated objects
-    objects.forEach(genObj => {
+    objects.forEach((genObj, index) => {
       groupRef.current!.add(genObj.object);
+      console.log(`Added generated object ${index}: ${genObj.object.name || 'unnamed'}`);
     });
+    
+    if (objects.length > 0) {
+      // Reset position and scale first
+      groupRef.current.position.set(0, 0, 0);
+      groupRef.current.scale.set(1, 1, 1);
+      groupRef.current.rotation.set(0, 0, 0);
+
+      // Calculate bounding box
+      const box = new THREE.Box3().setFromObject(groupRef.current);
+      
+      if (!box.isEmpty()) {
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        
+        console.log(`Generated objects - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+        console.log(`Generated objects - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
+        
+        // Move group so its center is at origin
+        groupRef.current.position.set(-center.x, -center.y, -center.z);
+
+        // Calculate optimal scale to fit in view (target size of 3 units)
+        const maxDim = Math.max(size.x, size.y, size.z);
+        
+        if (maxDim > 0 && maxDim > 5) { // Only scale down if it's too big
+          const targetSize = 3;
+          const scale = targetSize / maxDim;
+          groupRef.current.scale.setScalar(scale);
+          console.log(`Scaled generated objects by factor: ${scale.toFixed(6)}`);
+        }
+
+        // Update controls to look at center
+        if (orbitControls) {
+          orbitControls.target.set(0, 0, 0);
+          orbitControls.update();
+        }
+
+        // Position camera to view the object
+        const distance = Math.max(8, maxDim * 1.5);
+        camera.position.set(distance * 0.6, distance * 0.6, distance * 0.8);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+        
+        console.log(`Camera positioned for generated objects at: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
+      }
+    }
     
     return () => {
       // Remove objects from group on cleanup (but don't dispose - context handles that)
@@ -169,7 +234,7 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
         }
       }
     };
-  }, [objects]);
+  }, [objects, camera, controls]);
   
   return <group ref={groupRef} />;
 }
@@ -272,6 +337,29 @@ function SceneStatsCalculator({
     // Recalculate when model or generated objects change
   }, [modelObjects, generatedObjects, onStatsUpdate]);
 
+  return null;
+}
+
+// Camera rotation component for idle animation
+function CameraRotation() {
+  const { camera } = useThree();
+  
+  useFrame((state, delta) => {
+    // Get current camera position
+    const radius = Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z);
+    const currentAngle = Math.atan2(camera.position.z, camera.position.x);
+    
+    // Rotate around Y axis
+    const newAngle = currentAngle + delta * 0.05; // 0.05 rad/sec rotation speed
+    
+    // Update camera position maintaining the same distance and Y position
+    camera.position.x = radius * Math.cos(newAngle);
+    camera.position.z = radius * Math.sin(newAngle);
+    
+    // Keep camera looking at center
+    camera.lookAt(0, 0, 0);
+  });
+  
   return null;
 }
 
@@ -502,25 +590,6 @@ export const ModelViewer = () => {
               <p>Clear all commits and changes</p>
             </TooltipContent>
           </Tooltip>
-
-          {loadedModel && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearModel}
-                  className="gap-2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="w-4 h-4" />
-                  <span className="hidden sm:inline">Clear</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Clear loaded model</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
         </div>
 
         {/* Loaded file info */}
@@ -596,6 +665,7 @@ export const ModelViewer = () => {
             />
 
             <SceneContent onSceneReady={handleSceneReady} />
+            <CameraRotation />
 
             <OrbitControls
               enablePan={true}
@@ -605,7 +675,6 @@ export const ModelViewer = () => {
               dampingFactor={0.05}
               minDistance={0.5}
               maxDistance={200}
-              target={[0, 0, 0]}
               makeDefault
             />
           </Canvas>
