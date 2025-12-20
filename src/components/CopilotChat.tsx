@@ -18,6 +18,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useModel } from "@/contexts/ModelContext";
+import {
+  sendMessage,
+  isGeminiConfigured,
+  type ChatMessage,
+} from "@/lib/gemini-service";
 
 interface Message {
   id: string;
@@ -63,6 +68,7 @@ export const CopilotChat = () => {
   const [messages, setMessages] = useState<Message[]>([getInitialMessage()]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -109,14 +115,15 @@ export const CopilotChat = () => {
 
     // Export-related queries
     if (/export|save|download/i.test(lowerInput)) {
-      if (stats.objects === 0) {
+      const totalObjects = stats.curves + stats.surfaces + stats.polysurfaces;
+      if (totalObjects === 0) {
         return {
           content:
             "There's nothing in the scene yet. Drag & drop a .3dm file onto the viewport to get started.\n\nThe default cube in the viewport is just a placeholder.",
         };
       }
       return {
-        content: `Current scene:\n${stats.objects} object(s)\n${stats.vertices.toLocaleString()} vertices\n${stats.faces.toLocaleString()} faces`,
+        content: `Current scene:\n${stats.curves} curve(s)\n${stats.surfaces} surface(s)\n${stats.polysurfaces} polysurface(s)`,
         actions: [
           {
             id: "export-action",
@@ -133,7 +140,7 @@ export const CopilotChat = () => {
       if (loadedModel) {
         const fileSizeKB = (loadedModel.metadata.fileSize / 1024).toFixed(1);
         return {
-          content: `Current File: ${loadedModel.metadata.fileName}\nFile Size: ${fileSizeKB} KB\nObjects Loaded: ${loadedModel.metadata.objectCount}\n\nScene Statistics:\nVertices: ${stats.vertices.toLocaleString()}\nFaces: ${stats.faces.toLocaleString()}\nTotal Objects: ${stats.objects}`,
+          content: `Current File: ${loadedModel.metadata.fileName}\nFile Size: ${fileSizeKB} KB\nObjects Loaded: ${loadedModel.metadata.objectCount}\n\nScene Statistics:\nCurves: ${stats.curves}\nSurfaces: ${stats.surfaces}\nPolysurfaces: ${stats.polysurfaces}`,
           actions: [
             {
               id: "export-info",
@@ -151,26 +158,26 @@ export const CopilotChat = () => {
         };
       }
       return {
-        content: `Scene Statistics:\nVertices: ${stats.vertices.toLocaleString()}\nFaces: ${stats.faces.toLocaleString()}\nObjects: ${stats.objects}\n\nNo file is currently loaded. Drag & drop a .3dm file onto the viewport.`,
+        content: `Scene Statistics:\nCurves: ${stats.curves}\nSurfaces: ${stats.surfaces}\nPolysurfaces: ${stats.polysurfaces}\n\nNo file is currently loaded. Drag & drop a .3dm file onto the viewport.`,
       };
     }
 
     // Rhino-related queries
     if (/rhino|rhinoceros|3dm/i.test(lowerInput)) {
+      const hasObjects = stats.curves + stats.surfaces + stats.polysurfaces > 0;
       return {
         content:
           "This viewer supports Rhino 3D files (.3dm format).\n\nPowered by: Official rhino3dm library (OpenNURBS)\n\nSupported:\nMeshes, BReps, Extrusions\nCurves and Points\nObject colors and names\n\nDrag & drop a .3dm file onto the viewport to get started!",
-        actions:
-          stats.objects > 0
-            ? [
-                {
-                  id: "export-rhino",
-                  label: "Export to 3DM",
-                  icon: "export" as const,
-                  action: () => exportScene(),
-                },
-              ]
-            : undefined,
+        actions: hasObjects
+          ? [
+              {
+                id: "export-rhino",
+                label: "Export to 3DM",
+                icon: "export" as const,
+                action: () => exportScene(),
+              },
+            ]
+          : undefined,
       };
     }
 
@@ -240,25 +247,21 @@ export const CopilotChat = () => {
     }
 
     // Default response
-    const defaults = [
-      {
-        content:
-          "I can help you understand your 3D models! Try asking about:\n\nFile info - View statistics\nSubdividing meshes\nMaterials and colors\n\nWhat would you like to know?",
-        actions:
-          stats.objects > 0
-            ? [
-                {
-                  id: "export-default",
-                  label: "Export to 3DM",
-                  icon: "export" as const,
-                  action: () => exportScene(),
-                },
-              ]
-            : undefined,
-      },
-    ];
-
-    return defaults[0];
+    const hasObjects = stats.curves + stats.surfaces + stats.polysurfaces > 0;
+    return {
+      content:
+        "I can help you understand your 3D models! Try asking about:\n\nFile info - View statistics\nSubdividing meshes\nMaterials and colors\n\nWhat would you like to know?",
+      actions: hasObjects
+        ? [
+            {
+              id: "export-default",
+              label: "Export to 3DM",
+              icon: "export" as const,
+              action: () => exportScene(),
+            },
+          ]
+        : undefined,
+    };
   };
 
   const handleSend = async () => {
@@ -276,20 +279,65 @@ export const CopilotChat = () => {
     setInput("");
     setIsTyping(true);
 
-    // Simulate AI response with context-aware replies
-    setTimeout(() => {
-      const response = getResponse(userInput);
+    // Check if Gemini is configured
+    if (!isGeminiConfigured()) {
+      // Fallback to local responses if no API key
+      setTimeout(() => {
+        const response = getResponse(userInput);
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: response.content,
+          timestamp: new Date(),
+          actions: response.actions,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+        setIsTyping(false);
+      }, 600 + Math.random() * 400);
+      return;
+    }
+
+    // Use Gemini API
+    try {
+      const modelContext = {
+        hasModel: !!loadedModel,
+        fileName: loadedModel?.metadata.fileName,
+        objectCount: loadedModel?.metadata.objectCount,
+        curves: stats.curves,
+        surfaces: stats.surfaces,
+        polysurfaces: stats.polysurfaces,
+      };
+
+      const responseText = await sendMessage(userInput, chatHistory, modelContext);
+
+      // Update chat history for context
+      setChatHistory((prev) => [
+        ...prev,
+        { role: "user", parts: [{ text: userInput }] },
+        { role: "model", parts: [{ text: responseText }] },
+      ]);
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: response.content,
+        content: responseText,
         timestamp: new Date(),
-        actions: response.actions,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+    } catch (error) {
+      console.error("Error sending message:", error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Sorry, I encountered an error. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 600 + Math.random() * 400);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -339,10 +387,15 @@ export const CopilotChat = () => {
                 {isLoading ? "Loading..." : "Exporting..."}
               </span>
             </>
+          ) : isGeminiConfigured() ? (
+            <>
+              <div className="w-2 h-2 rounded-full bg-green-500" />
+              <span className="text-xs text-muted-foreground">Gemini</span>
+            </>
           ) : (
             <>
-              <div className="w-2 h-2 rounded-full bg-foreground" />
-              <span className="text-xs text-muted-foreground">Online</span>
+              <div className="w-2 h-2 rounded-full bg-yellow-500" />
+              <span className="text-xs text-muted-foreground">Offline</span>
             </>
           )}
         </div>
