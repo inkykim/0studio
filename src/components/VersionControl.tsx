@@ -31,16 +31,16 @@ export const VersionControl = () => {
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-6">
-          {/* Staged Changes */}
+          {/* Unstaged Changes */}
           <section>
             <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-              Staged Changes ({stagedChanges.length})
+              Changes ({unstagedChanges.length})
             </h3>
             <div className="space-y-1">
-              {stagedChanges.length === 0 ? (
-                <p className="text-xs text-muted-foreground px-2">No staged changes</p>
+              {unstagedChanges.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-2">No changes</p>
               ) : (
-                stagedChanges.map((file, idx) => (
+                unstagedChanges.map((file, idx) => (
                   <div
                     key={idx}
                     className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/50 transition-colors cursor-pointer group"
@@ -57,16 +57,16 @@ export const VersionControl = () => {
             </div>
           </section>
 
-          {/* Unstaged Changes */}
+          {/* Staged Changes */}
           <section>
             <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-              Changes ({unstagedChanges.length})
+              Staged Changes ({stagedChanges.length})
             </h3>
             <div className="space-y-1">
-              {unstagedChanges.length === 0 ? (
-                <p className="text-xs text-muted-foreground px-2">No changes</p>
+              {stagedChanges.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-2">No staged changes</p>
               ) : (
-                unstagedChanges.map((file, idx) => (
+                stagedChanges.map((file, idx) => (
                   <div
                     key={idx}
                     className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/50 transition-colors cursor-pointer group"

@@ -12,6 +12,7 @@ import {
   exportTo3dm,
   Rhino3dmMetadata,
 } from "@/lib/rhino3dm-service";
+import type { SerializedObject } from "@/contexts/VersionControlContext";
 
 export interface SceneStats {
   curves: number;
@@ -27,8 +28,16 @@ export interface LoadedModel {
 export interface GeneratedObject {
   id: string;
   object: THREE.Object3D;
-  type: string;
+  type: 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'plane';
   name: string;
+  color?: string;
+  params?: {
+    size?: number;
+    width?: number;
+    height?: number;
+    depth?: number;
+    radius?: number;
+  };
 }
 
 interface ModelContextType {
@@ -66,6 +75,10 @@ interface ModelContextType {
   }) => boolean;
   setObjectColor: (id: string, color: string) => boolean;
   clearGeneratedObjects: () => void;
+  
+  // Serialization for version control
+  serializeScene: () => SerializedObject[];
+  restoreScene: (objects: SerializedObject[]) => void;
   
   // Internal refs for components
   setStats: (stats: SceneStats) => void;
@@ -175,6 +188,14 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       object: mesh,
       type,
       name,
+      color,
+      params: {
+        size: params?.size,
+        width: params?.width,
+        height: params?.height,
+        depth: params?.depth,
+        radius: params?.radius,
+      },
     };
     
     setGeneratedObjects(prev => [...prev, newObject]);

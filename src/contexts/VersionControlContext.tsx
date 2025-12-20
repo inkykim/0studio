@@ -1,5 +1,23 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
 
+// Serializable representation of a 3D object for storage
+export interface SerializedObject {
+  id: string;
+  type: 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'plane';
+  name: string;
+  color: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+  params?: {
+    size?: number;
+    width?: number;
+    height?: number;
+    depth?: number;
+    radius?: number;
+  };
+}
+
 export interface Commit {
   id: string;
   message: string;
@@ -7,6 +25,8 @@ export interface Commit {
   time: string;
   timestamp: number;
   hash: string;
+  files: FileChange[];
+  sceneState: SerializedObject[];
 }
 
 export interface FileChange {
@@ -19,10 +39,12 @@ interface VersionControlContextType {
   stagedChanges: FileChange[];
   unstagedChanges: FileChange[];
   commits: Commit[];
+  currentCommitId: string | null;
   stageAllChanges: () => void;
-  commitChanges: (message: string) => void;
+  commitChanges: (message: string, sceneState: SerializedObject[]) => void;
   addChange: (change: FileChange) => void;
   removeChange: (name: string) => void;
+  restoreCommit: (commitId: string) => SerializedObject[] | null;
   hasUnstagedChanges: boolean;
   hasStagedChanges: boolean;
 }
@@ -108,6 +130,7 @@ export const VersionControlProvider = ({ children }: { children: ReactNode }) =>
   const [stagedChanges, setStagedChanges] = useState<FileChange[]>([]);
   const [unstagedChanges, setUnstagedChanges] = useState<FileChange[]>([]);
   const [commits, setCommits] = useState<Commit[]>([]);
+  const [currentCommitId, setCurrentCommitId] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load from localStorage on mount
@@ -144,7 +167,7 @@ export const VersionControlProvider = ({ children }: { children: ReactNode }) =>
     setUnstagedChanges([]);
   }, [unstagedChanges]);
 
-  const commitChanges = useCallback((message: string) => {
+  const commitChanges = useCallback((message: string, sceneState: SerializedObject[]) => {
     if (stagedChanges.length === 0 || !message.trim()) return;
     
     const timestamp = Date.now();
@@ -155,10 +178,13 @@ export const VersionControlProvider = ({ children }: { children: ReactNode }) =>
       time: "just now",
       timestamp,
       hash: generateHash(),
+      files: [...stagedChanges],
+      sceneState,
     };
 
     setCommits(prev => [newCommit, ...prev]);
     setStagedChanges([]);
+    setCurrentCommitId(newCommit.id);
   }, [stagedChanges]);
 
   const addChange = useCallback((change: FileChange) => {
@@ -181,14 +207,28 @@ export const VersionControlProvider = ({ children }: { children: ReactNode }) =>
     setStagedChanges(prev => prev.filter(c => c.name !== name));
   }, []);
 
+  const restoreCommit = useCallback((commitId: string): SerializedObject[] | null => {
+    const commit = commits.find(c => c.id === commitId);
+    if (!commit) return null;
+    
+    setCurrentCommitId(commitId);
+    // Clear any pending changes when restoring
+    setStagedChanges([]);
+    setUnstagedChanges([]);
+    
+    return commit.sceneState;
+  }, [commits]);
+
   const value: VersionControlContextType = {
     stagedChanges,
     unstagedChanges,
     commits,
+    currentCommitId,
     stageAllChanges,
     commitChanges,
     addChange,
     removeChange,
+    restoreCommit,
     hasUnstagedChanges: unstagedChanges.length > 0,
     hasStagedChanges: stagedChanges.length > 0,
   };
