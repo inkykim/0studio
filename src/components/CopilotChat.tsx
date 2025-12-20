@@ -46,10 +46,10 @@ interface MessageAction {
 }
 
 const suggestions = [
-  { icon: Code, text: "Subdivide the mesh" },
-  { icon: Lightbulb, text: "Add emission material" },
-  { icon: Box, text: "Create primitive shapes" },
-  { icon: FileBox, text: "Show file info" },
+  { icon: Box, text: "Create a red cube" },
+  { icon: Lightbulb, text: "Add 3 spheres in a row" },
+  { icon: Code, text: "Make a blue cylinder" },
+  { icon: FileBox, text: "Build a snowman" },
 ];
 
 export const CopilotChat = () => {
