@@ -317,6 +317,7 @@ export const ModelViewer = () => {
     clearError,
     setSceneRef,
     fileInputRef,
+    serializeScene,
   } = useModel();
 
   const {
@@ -381,7 +382,8 @@ export const ModelViewer = () => {
 
   const handleCommit = () => {
     if (commitMessage.trim()) {
-      commitChanges(commitMessage);
+      const sceneState = serializeScene();
+      commitChanges(commitMessage, sceneState);
       setIsCommitDialogOpen(false);
       setCommitMessage("");
     }

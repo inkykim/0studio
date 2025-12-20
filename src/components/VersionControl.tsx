@@ -1,6 +1,7 @@
-import { GitBranch, FileText, Plus, Minus, RefreshCw } from "lucide-react";
+import { GitBranch, FileText, Plus, Minus, RefreshCw, RotateCcw } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useVersionControl, FileChange } from "@/contexts/VersionControlContext";
+import { useModel } from "@/contexts/ModelContext";
 
 const StatusIcon = ({ status }: { status: FileChange["status"] }) => {
   switch (status) {
@@ -14,7 +15,15 @@ const StatusIcon = ({ status }: { status: FileChange["status"] }) => {
 };
 
 export const VersionControl = () => {
-  const { stagedChanges, unstagedChanges, commits } = useVersionControl();
+  const { stagedChanges, unstagedChanges, commits, currentCommitId, restoreCommit } = useVersionControl();
+  const { restoreScene } = useModel();
+
+  const handleRestoreCommit = (commitId: string) => {
+    const sceneState = restoreCommit(commitId);
+    if (sceneState) {
+      restoreScene(sceneState);
+    }
+  };
 
   return (
     <div className="h-full flex flex-col panel-glass">
@@ -92,28 +101,52 @@ export const VersionControl = () => {
               {commits.length === 0 ? (
                 <p className="text-xs text-muted-foreground px-2">No commits yet</p>
               ) : (
-                commits.map((commit, idx) => (
-                  <div key={commit.id} className="flex gap-3 group">
-                    {/* Timeline */}
-                    <div className="flex flex-col items-center">
-                      <div className="commit-dot mt-1.5" />
-                      {idx < commits.length - 1 && <div className="commit-line my-1" style={{ minHeight: "32px" }} />}
-                    </div>
-                    
-                    {/* Content */}
-                    <div className="flex-1 pb-4 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-medium truncate">{commit.message}</p>
-                        <span className="text-code text-xs text-muted-foreground shrink-0">
-                          {commit.hash}
-                        </span>
+                commits.map((commit, idx) => {
+                  const isCurrentCommit = commit.id === currentCommitId;
+                  return (
+                    <div 
+                      key={commit.id} 
+                      className={`flex gap-3 group cursor-pointer rounded-md transition-colors ${
+                        isCurrentCommit ? 'bg-primary/10' : 'hover:bg-secondary/50'
+                      }`}
+                      onClick={() => handleRestoreCommit(commit.id)}
+                      title={isCurrentCommit ? 'Current state' : 'Click to restore this commit'}
+                    >
+                      {/* Timeline */}
+                      <div className="flex flex-col items-center">
+                        <div className={`commit-dot mt-1.5 ${isCurrentCommit ? 'bg-primary' : ''}`} />
+                        {idx < commits.length - 1 && <div className="commit-line my-1" style={{ minHeight: "32px" }} />}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {commit.author} • {commit.time}
-                      </p>
+                      
+                      {/* Content */}
+                      <div className="flex-1 pb-4 min-w-0 pr-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{commit.message}</p>
+                            {isCurrentCommit && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary shrink-0">
+                                current
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-code text-xs text-muted-foreground shrink-0">
+                            {commit.hash}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {commit.author} • {commit.time}
+                        </p>
+                      </div>
+                      
+                      {/* Restore indicator on hover */}
+                      {!isCurrentCommit && (
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center pr-2">
+                          <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </section>

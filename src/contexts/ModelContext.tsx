@@ -336,6 +336,123 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, []);
 
+  // Serialize current scene state for version control
+  const serializeScene = useCallback((): SerializedObject[] => {
+    return generatedObjects.map(obj => {
+      const mesh = obj.object as THREE.Mesh;
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      
+      return {
+        id: obj.id,
+        type: obj.type,
+        name: obj.name,
+        color: obj.color || `#${material.color.getHexString()}`,
+        position: [mesh.position.x, mesh.position.y, mesh.position.z] as [number, number, number],
+        rotation: [
+          THREE.MathUtils.radToDeg(mesh.rotation.x),
+          THREE.MathUtils.radToDeg(mesh.rotation.y),
+          THREE.MathUtils.radToDeg(mesh.rotation.z),
+        ] as [number, number, number],
+        scale: [mesh.scale.x, mesh.scale.y, mesh.scale.z] as [number, number, number],
+        params: obj.params,
+      };
+    });
+  }, [generatedObjects]);
+
+  // Restore scene from serialized state
+  const restoreScene = useCallback((objects: SerializedObject[]) => {
+    // Clear existing objects
+    generatedObjects.forEach(obj => {
+      if (obj.object instanceof THREE.Mesh) {
+        obj.object.geometry.dispose();
+        const material = obj.object.material;
+        if (Array.isArray(material)) {
+          material.forEach(m => m.dispose());
+        } else {
+          material.dispose();
+        }
+      }
+    });
+    
+    // Recreate objects from serialized data
+    const newObjects: GeneratedObject[] = objects.map(serialized => {
+      const size = serialized.params?.size ?? 1;
+      let geometry: THREE.BufferGeometry;
+      
+      switch (serialized.type) {
+        case 'box':
+          geometry = new THREE.BoxGeometry(
+            serialized.params?.width ?? size,
+            serialized.params?.height ?? size,
+            serialized.params?.depth ?? size
+          );
+          break;
+        case 'sphere':
+          geometry = new THREE.SphereGeometry(serialized.params?.radius ?? size / 2, 32, 32);
+          break;
+        case 'cylinder':
+          geometry = new THREE.CylinderGeometry(
+            serialized.params?.radius ?? size / 2,
+            serialized.params?.radius ?? size / 2,
+            serialized.params?.height ?? size,
+            32
+          );
+          break;
+        case 'cone':
+          geometry = new THREE.ConeGeometry(
+            serialized.params?.radius ?? size / 2,
+            serialized.params?.height ?? size,
+            32
+          );
+          break;
+        case 'torus':
+          geometry = new THREE.TorusGeometry(
+            serialized.params?.radius ?? size / 2,
+            (serialized.params?.radius ?? size / 2) * 0.3,
+            16,
+            48
+          );
+          break;
+        case 'plane':
+          geometry = new THREE.PlaneGeometry(
+            serialized.params?.width ?? size,
+            serialized.params?.height ?? size
+          );
+          break;
+        default:
+          geometry = new THREE.BoxGeometry(size, size, size);
+      }
+      
+      const material = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(serialized.color),
+        metalness: 0.3,
+        roughness: 0.7,
+      });
+      
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(...serialized.position);
+      mesh.rotation.set(
+        THREE.MathUtils.degToRad(serialized.rotation[0]),
+        THREE.MathUtils.degToRad(serialized.rotation[1]),
+        THREE.MathUtils.degToRad(serialized.rotation[2])
+      );
+      mesh.scale.set(...serialized.scale);
+      mesh.name = serialized.name;
+      mesh.userData = { objectType: 'Generated', generatedId: serialized.id };
+      
+      return {
+        id: serialized.id,
+        object: mesh,
+        type: serialized.type,
+        name: serialized.name,
+        color: serialized.color,
+        params: serialized.params,
+      };
+    });
+    
+    setGeneratedObjects(newObjects);
+  }, [generatedObjects]);
+
   return (
     <ModelContext.Provider
       value={{
@@ -355,6 +472,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         transformObject,
         setObjectColor,
         clearGeneratedObjects,
+        serializeScene,
+        restoreScene,
         setStats,
         setSceneRef,
         fileInputRef,
