@@ -14,9 +14,9 @@ import {
 } from "@/lib/rhino3dm-service";
 
 export interface SceneStats {
-  vertices: number;
-  faces: number;
-  objects: number;
+  curves: number;
+  surfaces: number;
+  polysurfaces: number;
 }
 
 export interface LoadedModel {
@@ -53,9 +53,9 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<SceneStats>({
-    vertices: 0,
-    faces: 0,
-    objects: 0,
+    curves: 0,
+    surfaces: 0,
+    polysurfaces: 0,
   });
   
   const sceneRef = useRef<THREE.Scene | null>(null);

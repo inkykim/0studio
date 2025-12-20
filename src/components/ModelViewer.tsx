@@ -159,43 +159,62 @@ function SceneStatsCalculator({
 }) {
   useEffect(() => {
     const calculateStats = () => {
-      let vertices = 0;
-      let faces = 0;
-      let objects = 0;
+      let curves = 0;
+      let surfaces = 0;
+      let polysurfaces = 0;
 
       // Only count objects from the loaded model
       if (modelObjects && modelObjects.length > 0) {
-        const meshDetails: string[] = [];
+        const objectDetails: string[] = [];
         
         modelObjects.forEach((obj) => {
           obj.traverse((child) => {
-            if (child instanceof THREE.Mesh && child.geometry) {
-              objects++;
-              const geometry = child.geometry;
-              const vCount = geometry.attributes.position?.count || 0;
-              let fCount = 0;
-
-              if (geometry.index) {
-                fCount = geometry.index.count / 3;
-              } else if (geometry.attributes.position) {
-                fCount = geometry.attributes.position.count / 3;
+            // Get the original Rhino object type from userData
+            const objectType = child.userData?.objectType as string | undefined;
+            
+            if (objectType) {
+              switch (objectType) {
+                case 'Curve':
+                  curves++;
+                  objectDetails.push(`Curve: ${child.name || 'unnamed'}`);
+                  break;
+                case 'Mesh':
+                  // A single mesh is a surface
+                  surfaces++;
+                  objectDetails.push(`Surface (Mesh): ${child.name || 'unnamed'}`);
+                  break;
+                case 'Brep':
+                  // Breps are polysurfaces (boundary representations)
+                  polysurfaces++;
+                  objectDetails.push(`Polysurface (Brep): ${child.name || 'unnamed'}`);
+                  break;
+                case 'Extrusion':
+                  // Extrusions are also polysurfaces
+                  polysurfaces++;
+                  objectDetails.push(`Polysurface (Extrusion): ${child.name || 'unnamed'}`);
+                  break;
+                case 'SubD':
+                  // SubD surfaces count as surfaces
+                  surfaces++;
+                  objectDetails.push(`Surface (SubD): ${child.name || 'unnamed'}`);
+                  break;
+                default:
+                  // Log unknown types for debugging
+                  if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+                    console.log(`Unknown objectType: ${objectType}`);
+                  }
               }
-
-              vertices += vCount;
-              faces += fCount;
-              
-              meshDetails.push(`${child.name || 'unnamed'}: ${vCount}v, ${fCount}f`);
             }
           });
         });
         
         // Log once when model changes
-        if (meshDetails.length > 0) {
-          console.log("Model breakdown:", meshDetails);
+        if (objectDetails.length > 0) {
+          console.log("Model breakdown:", objectDetails);
         }
       }
 
-      onStatsUpdate({ vertices, faces, objects });
+      onStatsUpdate({ curves, surfaces, polysurfaces });
     };
 
     calculateStats();
@@ -334,7 +353,7 @@ export const ModelViewer = () => {
                 variant="secondary"
                 size="sm"
                 onClick={() => exportScene()}
-                disabled={isExporting || stats.objects === 0}
+                disabled={isExporting || (stats.curves === 0 && stats.surfaces === 0 && stats.polysurfaces === 0)}
                 className="gap-2"
               >
                 {isExporting ? (
@@ -459,9 +478,9 @@ export const ModelViewer = () => {
 
           {/* Viewport info overlay */}
           <div className="absolute bottom-4 left-4 text-code text-xs text-muted-foreground space-y-1">
-            <div>Vertices: {stats.vertices.toLocaleString()}</div>
-            <div>Faces: {stats.faces.toLocaleString()}</div>
-            <div>Objects: {stats.objects}</div>
+            <div>Curves: {stats.curves}</div>
+            <div>Surfaces: {stats.surfaces}</div>
+            <div>Polysurfaces: {stats.polysurfaces}</div>
           </div>
 
           {/* Controls hint */}
