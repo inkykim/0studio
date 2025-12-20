@@ -10,6 +10,7 @@ import {
   X,
   GitCommit,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { useModel, SceneStats, GeneratedObject } from "@/contexts/ModelContext";
 import { useVersionControl } from "@/contexts/VersionControlContext";
@@ -323,6 +324,8 @@ export const ModelViewer = () => {
   const {
     stageAllChanges,
     commitChanges,
+    clearHistory,
+    commits,
     hasUnstagedChanges,
     hasStagedChanges,
   } = useVersionControl();
@@ -480,6 +483,24 @@ export const ModelViewer = () => {
             </TooltipTrigger>
             <TooltipContent>
               <p>Commit staged changes</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearHistory}
+                disabled={commits.length === 0}
+                className="gap-2 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span className="hidden sm:inline">Clear History</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Clear all commits and changes</p>
             </TooltipContent>
           </Tooltip>
 

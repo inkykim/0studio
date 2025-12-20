@@ -45,6 +45,7 @@ interface VersionControlContextType {
   addChange: (change: FileChange) => void;
   removeChange: (name: string) => void;
   restoreCommit: (commitId: string) => SerializedObject[] | null;
+  clearHistory: () => void;
   hasUnstagedChanges: boolean;
   hasStagedChanges: boolean;
 }
@@ -219,6 +220,13 @@ export const VersionControlProvider = ({ children }: { children: ReactNode }) =>
     return commit.sceneState;
   }, [commits]);
 
+  const clearHistory = useCallback(() => {
+    setCommits([]);
+    setStagedChanges([]);
+    setUnstagedChanges([]);
+    setCurrentCommitId(null);
+  }, []);
+
   const value: VersionControlContextType = {
     stagedChanges,
     unstagedChanges,
@@ -229,6 +237,7 @@ export const VersionControlProvider = ({ children }: { children: ReactNode }) =>
     addChange,
     removeChange,
     restoreCommit,
+    clearHistory,
     hasUnstagedChanges: unstagedChanges.length > 0,
     hasStagedChanges: stagedChanges.length > 0,
   };
