@@ -9,7 +9,7 @@ import {
   FileBox,
   X,
 } from "lucide-react";
-import { useModel, SceneStats } from "@/contexts/ModelContext";
+import { useModel, SceneStats, GeneratedObject } from "@/contexts/ModelContext";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -131,6 +131,35 @@ function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
   return <group ref={groupRef} />;
 }
 
+function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
+  const groupRef = useRef<THREE.Group>(null);
+  
+  useEffect(() => {
+    if (!groupRef.current) return;
+    
+    // Clear existing children
+    while (groupRef.current.children.length > 0) {
+      groupRef.current.remove(groupRef.current.children[0]);
+    }
+    
+    // Add all generated objects
+    objects.forEach(genObj => {
+      groupRef.current!.add(genObj.object);
+    });
+    
+    return () => {
+      // Remove objects from group on cleanup (but don't dispose - context handles that)
+      if (groupRef.current) {
+        while (groupRef.current.children.length > 0) {
+          groupRef.current.remove(groupRef.current.children[0]);
+        }
+      }
+    };
+  }, [objects]);
+  
+  return <group ref={groupRef} />;
+}
+
 function GridFloor() {
   return (
     <Grid
@@ -232,19 +261,19 @@ function SceneContent({
   onSceneReady: (scene: THREE.Scene) => void;
 }) {
   const { scene } = useThree();
-  const { loadedModel, setStats } = useModel();
+  const { loadedModel, generatedObjects, setStats } = useModel();
 
   useEffect(() => {
     onSceneReady(scene);
   }, [scene, onSceneReady]);
 
+  const hasContent = loadedModel || generatedObjects.length > 0;
+
   return (
     <>
-      {loadedModel ? (
-        <LoadedObjects objects={loadedModel.objects} />
-      ) : (
-        <DefaultCube />
-      )}
+      {loadedModel && <LoadedObjects objects={loadedModel.objects} />}
+      {generatedObjects.length > 0 && <GeneratedObjects objects={generatedObjects} />}
+      {!hasContent && <DefaultCube />}
       <GridFloor />
       <SceneStatsCalculator 
         onStatsUpdate={setStats} 

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Sparkles,
   Send,
@@ -23,6 +23,11 @@ import {
   isGeminiConfigured,
   type ChatMessage,
 } from "@/lib/gemini-service";
+import {
+  parseGeminiResponse,
+  executeCommands,
+  type CommandExecutor,
+} from "@/lib/scene-commands";
 
 interface Message {
   id: string;
@@ -52,16 +57,22 @@ export const CopilotChat = () => {
     isLoading,
     isExporting,
     stats,
+    generatedObjects,
     triggerFileDialog,
     exportScene,
     clearModel,
+    addPrimitive,
+    removeObject,
+    transformObject,
+    setObjectColor,
+    clearGeneratedObjects,
   } = useModel();
 
   const getInitialMessage = (): Message => ({
     id: "1",
     role: "assistant",
     content:
-      "Hello! I'm your 3D modeling assistant. I can help you with:\n\nModifying geometry and materials\nOptimizing mesh topology\nApplying transformations\nGenerating procedural shapes\n\nDrag & drop a .3dm file onto the viewport. What would you like to work on?",
+      "Hello! I'm your 3D modeling assistant. I can:\n\n• Create shapes (box, sphere, cylinder, cone, torus)\n• Move, rotate, and scale objects\n• Change colors\n• Import/export .3dm files\n\nTry saying \"Create a red cube\" or \"Add 3 spheres in a row\"!",
     timestamp: new Date(Date.now() - 60000),
   });
 
@@ -307,9 +318,35 @@ export const CopilotChat = () => {
         curves: stats.curves,
         surfaces: stats.surfaces,
         polysurfaces: stats.polysurfaces,
+        generatedObjects: generatedObjects.map(obj => ({
+          id: obj.id,
+          type: obj.type,
+          name: obj.name,
+        })),
       };
 
       const responseText = await sendMessage(userInput, chatHistory, modelContext);
+
+      // Parse the response for commands
+      const { message, commands } = parseGeminiResponse(responseText);
+
+      // Execute any commands found
+      if (commands.length > 0) {
+        const executor: CommandExecutor = {
+          addPrimitive,
+          removeObject,
+          transformObject,
+          setObjectColor,
+          clearGeneratedObjects,
+          getLastObjectId: () => generatedObjects.length > 0 ? generatedObjects[generatedObjects.length - 1].id : null,
+        };
+
+        const result = executeCommands(commands, executor);
+        
+        if (result.errors.length > 0) {
+          console.warn("Command execution errors:", result.errors);
+        }
+      }
 
       // Update chat history for context
       setChatHistory((prev) => [
@@ -321,7 +358,7 @@ export const CopilotChat = () => {
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: responseText,
+        content: message || "Done!",
         timestamp: new Date(),
       };
 

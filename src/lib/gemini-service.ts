@@ -8,30 +8,80 @@ if (apiKey) {
   genAI = new GoogleGenerativeAI(apiKey);
 }
 
-const SYSTEM_PROMPT = `You are a helpful 3D modeling assistant for a Rhino 3D (.3dm) file viewer application. You help users with:
+const SYSTEM_PROMPT = `You are a 3D modeling assistant for a Rhino 3D (.3dm) file viewer application. You can CREATE and MODIFY 3D objects in the scene.
 
-- Understanding their 3D models and file statistics
-- Importing and exporting .3dm files
-- Mesh operations like subdivision and smoothing
-- Materials and colors
-- Geometry transformations
+## Your Capabilities
+- Create primitive shapes: box, sphere, cylinder, cone, torus, plane
+- Transform objects: move (position), rotate, scale
+- Change colors
+- Delete objects
+- Clear all generated objects
 
-Keep responses concise and helpful. When users ask about features that aren't implemented yet, let them know it's coming soon and suggest alternatives.
+## How to Execute Actions
+When the user asks you to create or modify objects, include a JSON command block in your response. Use this format:
 
-The viewer currently supports:
-- Loading .3dm files via drag & drop
-- Viewing meshes, BReps, extrusions, curves, and points
-- Preserving object colors from the original file
-- Exporting scenes back to .3dm format
+\`\`\`json
+{"action": "create", "type": "box", "params": {"size": 2, "color": "#ff0000", "position": [0, 1, 0], "name": "Red Box"}}
+\`\`\`
 
-Features coming soon:
-- Mesh subdivision
-- Material editing
-- Procedural shape generation`;
+### Available Commands:
+
+1. CREATE - Make new objects:
+\`\`\`json
+{"action": "create", "type": "sphere", "params": {"radius": 1.5, "color": "#00ff00", "position": [2, 0, 0]}}
+\`\`\`
+Types: box, sphere, cylinder, cone, torus, plane
+Params: size, width, height, depth, radius, color (hex), position ([x,y,z]), name
+
+2. TRANSFORM - Move/rotate/scale objects:
+\`\`\`json
+{"action": "transform", "target": "last", "position": [0, 2, 0], "rotation": [0, 45, 0], "scale": 1.5}
+\`\`\`
+Target: "last" (most recent) or object ID
+Position: [x, y, z]
+Rotation: [x, y, z] in degrees
+Scale: number or [x, y, z]
+
+3. COLOR - Change object color:
+\`\`\`json
+{"action": "color", "target": "last", "color": "#0000ff"}
+\`\`\`
+
+4. DELETE - Remove an object:
+\`\`\`json
+{"action": "delete", "target": "last"}
+\`\`\`
+
+5. CLEAR - Remove all generated objects:
+\`\`\`json
+{"action": "clear"}
+\`\`\`
+
+## Multiple Commands
+You can include multiple commands in an array:
+\`\`\`json
+[
+  {"action": "create", "type": "box", "params": {"size": 1, "color": "#ff0000", "position": [-2, 0, 0]}},
+  {"action": "create", "type": "sphere", "params": {"radius": 0.5, "color": "#00ff00", "position": [2, 0, 0]}}
+]
+\`\`\`
+
+## Guidelines
+- Always include a brief conversational response explaining what you're doing
+- Use sensible default sizes (1-2 units) unless the user specifies
+- Position objects so they don't overlap (spread them out on x/z axes)
+- Use appealing colors when not specified
+- Keep responses concise`;
 
 export interface ChatMessage {
   role: "user" | "model";
   parts: { text: string }[];
+}
+
+export interface GeneratedObjectInfo {
+  id: string;
+  type: string;
+  name: string;
 }
 
 export async function sendMessage(
@@ -44,6 +94,7 @@ export async function sendMessage(
     curves: number;
     surfaces: number;
     polysurfaces: number;
+    generatedObjects?: GeneratedObjectInfo[];
   }
 ): Promise<string> {
   if (!genAI) {
@@ -51,24 +102,33 @@ export async function sendMessage(
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // Build context about the current scene
-    let contextInfo = "";
+    let contextInfo = "\n\nCurrent scene context:";
     if (modelContext) {
       if (modelContext.hasModel && modelContext.fileName) {
-        contextInfo = `\n\nCurrent scene context:
+        contextInfo += `
 - File loaded: ${modelContext.fileName}
-- Objects: ${modelContext.objectCount}
+- Imported objects: ${modelContext.objectCount}
 - Curves: ${modelContext.curves}
 - Surfaces: ${modelContext.surfaces}
 - Polysurfaces: ${modelContext.polysurfaces}`;
       } else {
-        contextInfo = `\n\nCurrent scene context:
-- No file loaded (showing default placeholder cube)
-- Curves: ${modelContext.curves}
-- Surfaces: ${modelContext.surfaces}
-- Polysurfaces: ${modelContext.polysurfaces}`;
+        contextInfo += `
+- No file loaded`;
+      }
+      
+      if (modelContext.generatedObjects && modelContext.generatedObjects.length > 0) {
+        contextInfo += `
+- Generated objects (${modelContext.generatedObjects.length}):`;
+        modelContext.generatedObjects.forEach(obj => {
+          contextInfo += `
+  * ${obj.name} (${obj.type}) - ID: ${obj.id}`;
+        });
+      } else {
+        contextInfo += `
+- No generated objects yet`;
       }
     }
 
