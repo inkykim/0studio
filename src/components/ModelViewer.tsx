@@ -19,17 +19,8 @@ import {
 } from "@/components/ui/tooltip";
 
 function DefaultCube() {
-  const meshRef = useRef<THREE.Mesh>(null);
-
-  useFrame((state) => {
-    if (meshRef.current) {
-      meshRef.current.rotation.y = state.clock.elapsedTime * 0.2;
-      meshRef.current.rotation.x = state.clock.elapsedTime * 0.1;
-    }
-  });
-
   return (
-    <mesh ref={meshRef}>
+    <mesh>
       <boxGeometry args={[2, 2, 2]} />
       <meshStandardMaterial color="#888888" metalness={0.3} roughness={0.7} />
     </mesh>
@@ -134,17 +125,7 @@ function LoadedObjects({ objects }: { objects: THREE.Object3D[] }) {
     }
   }, [objects, camera, controls]);
 
-  return (
-    <group ref={groupRef}>
-      {/* Add a small sphere at origin for debugging */}
-      {objects.length > 0 && (
-        <mesh position={[0, 0, 0]}>
-          <sphereGeometry args={[0.1, 16, 16]} />
-          <meshBasicMaterial color="#ff0000" />
-        </mesh>
-      )}
-    </group>
-  );
+  return <group ref={groupRef} />;
 }
 
 function GridFloor() {

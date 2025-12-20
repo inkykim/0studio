@@ -13,18 +13,16 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // Use the ES module version of rhino3dm for better Vite compatibility
-      "rhino3dm": path.resolve(__dirname, "./node_modules/rhino3dm/rhino3dm.module.js"),
     },
   },
   optimizeDeps: {
-    // Exclude rhino3dm from pre-bundling as it has WASM
+    // Exclude rhino3dm from pre-bundling - it's loaded from CDN via Three.js loader
     exclude: ["rhino3dm"],
   },
   build: {
     rollupOptions: {
-      // Mark 'ws' as external since rhino3dm only needs it server-side
-      external: ["ws"],
+      // Mark rhino3dm and ws as external - rhino3dm is loaded from CDN
+      external: ["rhino3dm", "ws"],
     },
   },
 }));
