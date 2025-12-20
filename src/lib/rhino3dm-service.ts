@@ -106,25 +106,53 @@ export async function load3dmFile(
   });
 }
 
+// Singleton for rhino3dm module loaded from CDN
+let rhinoModule: any = null;
+
+/**
+ * Load rhino3dm from CDN (same version as the loader uses)
+ */
+async function getRhino3dm(): Promise<any> {
+  if (rhinoModule) {
+    return rhinoModule;
+  }
+
+  // Load rhino3dm from CDN
+  const rhino3dmUrl = "https://cdn.jsdelivr.net/npm/rhino3dm@8.4.0/rhino3dm.min.js";
+  
+  // Check if already loaded globally
+  if ((window as any).rhino3dm) {
+    rhinoModule = await (window as any).rhino3dm();
+    return rhinoModule;
+  }
+
+  // Load the script
+  await new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = rhino3dmUrl;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load rhino3dm"));
+    document.head.appendChild(script);
+  });
+
+  // Initialize rhino3dm
+  if ((window as any).rhino3dm) {
+    rhinoModule = await (window as any).rhino3dm();
+    return rhinoModule;
+  }
+
+  throw new Error("rhino3dm failed to initialize");
+}
+
 /**
  * Export Three.js scene to a .3dm file
- * Note: This still needs rhino3dm for creating 3dm files
  */
 export async function exportTo3dm(
   scene: THREE.Object3D,
   filename: string = "export.3dm"
 ): Promise<void> {
-  // For export, we need to use rhino3dm directly
-  // Dynamic import to avoid the ws issue during initial load
-  const rhino3dmModule = await import("rhino3dm");
-  const factory = rhino3dmModule.default || rhino3dmModule;
-  
-  let rhino: any;
-  if (typeof factory === "function") {
-    rhino = await factory();
-  } else {
-    rhino = factory;
-  }
+  // Load rhino3dm from CDN
+  const rhino = await getRhino3dm();
 
   const doc = new rhino.File3dm();
 

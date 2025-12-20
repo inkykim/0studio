@@ -8,8 +8,11 @@ import {
   Loader2,
   FileBox,
   X,
+  GitCommit,
+  Plus,
 } from "lucide-react";
 import { useModel, SceneStats, GeneratedObject } from "@/contexts/ModelContext";
+import { useVersionControl } from "@/contexts/VersionControlContext";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -17,6 +20,16 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 function DefaultCube() {
   return (
@@ -182,9 +195,11 @@ function GridFloor() {
 function SceneStatsCalculator({
   onStatsUpdate,
   modelObjects,
+  generatedObjects,
 }: {
   onStatsUpdate: (stats: SceneStats) => void;
   modelObjects: THREE.Object3D[] | null;
+  generatedObjects: GeneratedObject[];
 }) {
   useEffect(() => {
     const calculateStats = () => {
@@ -192,7 +207,7 @@ function SceneStatsCalculator({
       let surfaces = 0;
       let polysurfaces = 0;
 
-      // Only count objects from the loaded model
+      // Count objects from the loaded model
       if (modelObjects && modelObjects.length > 0) {
         const objectDetails: string[] = [];
         
@@ -243,13 +258,18 @@ function SceneStatsCalculator({
         }
       }
 
+      // Count generated objects as polysurfaces (AI-generated primitives are solid shapes)
+      if (generatedObjects.length > 0) {
+        polysurfaces += generatedObjects.length;
+      }
+
       onStatsUpdate({ curves, surfaces, polysurfaces });
     };
 
     calculateStats();
     
-    // Only recalculate on model change, not on interval
-  }, [modelObjects, onStatsUpdate]);
+    // Recalculate when model or generated objects change
+  }, [modelObjects, generatedObjects, onStatsUpdate]);
 
   return null;
 }
@@ -278,6 +298,7 @@ function SceneContent({
       <SceneStatsCalculator 
         onStatsUpdate={setStats} 
         modelObjects={loadedModel?.objects || null}
+        generatedObjects={generatedObjects}
       />
     </>
   );
@@ -298,7 +319,16 @@ export const ModelViewer = () => {
     fileInputRef,
   } = useModel();
 
+  const {
+    stageAllChanges,
+    commitChanges,
+    hasUnstagedChanges,
+    hasStagedChanges,
+  } = useVersionControl();
+
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
 
   const handleSceneReady = useCallback((scene: THREE.Scene) => {
     setSceneRef(scene);
@@ -338,6 +368,23 @@ export const ModelViewer = () => {
     }
     // Reset input so the same file can be loaded again
     e.target.value = "";
+  };
+
+  const handleStageChanges = () => {
+    stageAllChanges();
+  };
+
+  const handleOpenCommitDialog = () => {
+    setCommitMessage("");
+    setIsCommitDialogOpen(true);
+  };
+
+  const handleCommit = () => {
+    if (commitMessage.trim()) {
+      commitChanges(commitMessage);
+      setIsCommitDialogOpen(false);
+      setCommitMessage("");
+    }
   };
 
   return (
@@ -395,6 +442,42 @@ export const ModelViewer = () => {
             </TooltipTrigger>
             <TooltipContent>
               <p>Export scene to Rhino 3DM format</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleStageChanges}
+                disabled={!hasUnstagedChanges}
+                className="gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Stage</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Stage all changes for commit</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleOpenCommitDialog}
+                disabled={!hasStagedChanges}
+                className="gap-2"
+              >
+                <GitCommit className="w-4 h-4" />
+                <span className="hidden sm:inline">Commit</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Commit staged changes</p>
             </TooltipContent>
           </Tooltip>
 
@@ -519,6 +602,50 @@ export const ModelViewer = () => {
             </span>
           </div>
         </div>
+
+        {/* Commit Dialog */}
+        <Dialog open={isCommitDialogOpen} onOpenChange={setIsCommitDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create Commit</DialogTitle>
+              <DialogDescription>
+                Enter a commit message describing your changes.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="commit-message">Commit Message</Label>
+                <Input
+                  id="commit-message"
+                  placeholder="Describe your changes..."
+                  value={commitMessage}
+                  onChange={(e) => setCommitMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && commitMessage.trim()) {
+                      handleCommit();
+                    }
+                  }}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => setIsCommitDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCommit}
+                disabled={!commitMessage.trim()}
+              >
+                <GitCommit className="w-4 h-4 mr-2" />
+                Commit
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   );

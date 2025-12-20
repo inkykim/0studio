@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useModel } from "@/contexts/ModelContext";
+import { useVersionControl } from "@/contexts/VersionControlContext";
 import {
   sendMessage,
   isGeminiConfigured,
@@ -67,6 +68,8 @@ export const CopilotChat = () => {
     setObjectColor,
     clearGeneratedObjects,
   } = useModel();
+
+  const { addChange, removeChange } = useVersionControl();
 
   const getInitialMessage = (): Message => ({
     id: "1",
@@ -343,6 +346,45 @@ export const CopilotChat = () => {
 
         const result = executeCommands(commands, executor);
         
+        // Track changes for version control
+        for (const cmd of commands) {
+          if (cmd.action === "create") {
+            const name = cmd.params?.name || `${cmd.type}.mesh`;
+            addChange({
+              name,
+              status: "added",
+              path: "scene/",
+            });
+          } else if (cmd.action === "delete") {
+            const obj = generatedObjects.find(o => o.id === cmd.target);
+            if (obj) {
+              addChange({
+                name: obj.name || `${obj.type}.mesh`,
+                status: "deleted",
+                path: "scene/",
+              });
+            }
+          } else if (cmd.action === "transform" || cmd.action === "color") {
+            const obj = generatedObjects.find(o => o.id === cmd.target);
+            if (obj) {
+              addChange({
+                name: obj.name || `${obj.type}.mesh`,
+                status: "modified",
+                path: "scene/",
+              });
+            }
+          } else if (cmd.action === "clear") {
+            // Track all cleared objects as deleted
+            for (const obj of generatedObjects) {
+              addChange({
+                name: obj.name || `${obj.type}.mesh`,
+                status: "deleted",
+                path: "scene/",
+              });
+            }
+          }
+        }
+        
         if (result.errors.length > 0) {
           console.warn("Command execution errors:", result.errors);
         }
@@ -426,12 +468,12 @@ export const CopilotChat = () => {
             </>
           ) : isGeminiConfigured() ? (
             <>
-              <div className="w-2 h-2 rounded-full bg-green-500" />
-              <span className="text-xs text-muted-foreground">Gemini</span>
+              <div className="w-2 h-2 rounded-full bg-white" />
+              <span className="text-xs text-muted-foreground">Online</span>
             </>
           ) : (
             <>
-              <div className="w-2 h-2 rounded-full bg-yellow-500" />
+              <div className="w-2 h-2 rounded-full bg-red-500" />
               <span className="text-xs text-muted-foreground">Offline</span>
             </>
           )}
