@@ -3,34 +3,11 @@ import { OrbitControls, Grid } from "@react-three/drei";
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import {
-  Upload,
-  Download,
-  Loader2,
   FileBox,
   X,
-  GitCommit,
-  Plus,
-  Trash2,
 } from "lucide-react";
 import { useModel, SceneStats, GeneratedObject } from "@/contexts/ModelContext";
-import { useVersionControl } from "@/contexts/VersionControlContext";
-import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-  TooltipProvider,
-} from "@/components/ui/tooltip";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 function DefaultCube() {
   return (
@@ -395,202 +372,25 @@ function SceneContent({
 export const ModelViewer = () => {
   const {
     loadedModel,
-    isLoading,
-    isExporting,
     error,
     stats,
-    importFile,
-    exportScene,
-    clearModel,
     clearError,
     setSceneRef,
-    fileInputRef,
-    serializeScene,
   } = useModel();
 
-  const {
-    stageAllChanges,
-    commitChanges,
-    clearHistory,
-    commits,
-    hasUnstagedChanges,
-    hasStagedChanges,
-  } = useVersionControl();
-
   const [isDragOver, setIsDragOver] = useState(false);
-  const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
 
   const handleSceneReady = useCallback((scene: THREE.Scene) => {
     setSceneRef(scene);
   }, [setSceneRef]);
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragOver(false);
 
-      const files = Array.from(e.dataTransfer.files);
-      const dmFile = files.find((f) => f.name.toLowerCase().endsWith(".3dm"));
 
-      if (dmFile) {
-        importFile(dmFile);
-      } else {
-        // Error will be set by importFile if needed
-      }
-    },
-    [importFile]
-  );
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-  }, []);
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      importFile(file);
-    }
-    // Reset input so the same file can be loaded again
-    e.target.value = "";
-  };
-
-  const handleStageChanges = () => {
-    stageAllChanges();
-  };
-
-  const handleOpenCommitDialog = () => {
-    setCommitMessage("");
-    setIsCommitDialogOpen(true);
-  };
-
-  const handleCommit = () => {
-    if (commitMessage.trim()) {
-      const sceneState = serializeScene();
-      commitChanges(commitMessage, sceneState);
-      setIsCommitDialogOpen(false);
-      setCommitMessage("");
-    }
-  };
 
   return (
     <TooltipProvider>
       <div className="h-full flex flex-col panel-glass relative">
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".3dm"
-          onChange={handleFileInputChange}
-          className="hidden"
-        />
-
-        {/* Toolbar */}
-        <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-                className="gap-2"
-              >
-                {isLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Upload className="w-4 h-4" />
-                )}
-                <span className="hidden sm:inline">Import 3DM</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Import Rhino 3DM file</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => exportScene()}
-                disabled={isExporting || (stats.curves === 0 && stats.surfaces === 0 && stats.polysurfaces === 0)}
-                className="gap-2"
-              >
-                {isExporting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                <span className="hidden sm:inline">Export 3DM</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Export scene to Rhino 3DM format</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleStageChanges}
-                disabled={!hasUnstagedChanges}
-                className="gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="hidden sm:inline">Stage</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Stage all changes for commit</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleOpenCommitDialog}
-                disabled={!hasStagedChanges}
-                className="gap-2"
-              >
-                <GitCommit className="w-4 h-4" />
-                <span className="hidden sm:inline">Commit</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Commit staged changes</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={clearHistory}
-                disabled={commits.length === 0}
-                className="gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span className="hidden sm:inline">Clear History</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Clear all commits and changes</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
 
         {/* Loaded file info */}
         {loadedModel && (
@@ -616,24 +416,7 @@ export const ModelViewer = () => {
         )}
 
         {/* Canvas */}
-        <div
-          className="flex-1 relative"
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-        >
-          {/* Drag overlay */}
-          {isDragOver && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 backdrop-blur-sm border-2 border-dashed border-primary rounded-lg">
-              <div className="text-center">
-                <Upload className="w-12 h-12 text-primary mx-auto mb-2" />
-                <p className="text-lg font-medium">Drop .3dm file here</p>
-                <p className="text-sm text-muted-foreground">
-                  to import Rhino 3D model
-                </p>
-              </div>
-            </div>
-          )}
+        <div className="flex-1 relative">
 
           <Canvas
             camera={{ position: [5, 5, 8], fov: 50 }}
@@ -680,63 +463,19 @@ export const ModelViewer = () => {
           </Canvas>
 
           {/* Viewport info overlay */}
-          <div className="absolute bottom-4 left-4 text-code text-xs text-muted-foreground space-y-1">
+          <div className="absolute bottom-4 left-4 z-20 text-code text-xs text-muted-foreground space-y-1">
             <div>Curves: {stats.curves}</div>
             <div>Surfaces: {stats.surfaces}</div>
             <div>Polysurfaces: {stats.polysurfaces}</div>
           </div>
 
           {/* Controls hint */}
-          <div className="absolute bottom-4 right-4 text-code text-xs text-muted-foreground">
+          <div className="absolute bottom-4 right-4 z-20 text-code text-xs text-muted-foreground">
             <span className="opacity-60">
               Drag to rotate / Scroll to zoom
             </span>
           </div>
         </div>
-
-        {/* Commit Dialog */}
-        <Dialog open={isCommitDialogOpen} onOpenChange={setIsCommitDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Create Commit</DialogTitle>
-              <DialogDescription>
-                Enter a commit message describing your changes.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="commit-message">Commit Message</Label>
-                <Input
-                  id="commit-message"
-                  placeholder="Describe your changes..."
-                  value={commitMessage}
-                  onChange={(e) => setCommitMessage(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && commitMessage.trim()) {
-                      handleCommit();
-                    }
-                  }}
-                  autoFocus
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                variant="ghost"
-                onClick={() => setIsCommitDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleCommit}
-                disabled={!commitMessage.trim()}
-              >
-                <GitCommit className="w-4 h-4 mr-2" />
-                Commit
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </TooltipProvider>
   );

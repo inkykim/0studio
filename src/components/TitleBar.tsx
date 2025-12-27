@@ -1,24 +1,33 @@
 import { Circle } from "lucide-react";
+import { useVersionControl } from "@/contexts/VersionControlContext";
 
 export const TitleBar = () => {
+  const { currentProject, projectName, isGitRepo, openProject } = useVersionControl();
+
   return (
     <div className="h-11 bg-panel-header border-b border-panel-border flex items-center px-4 select-none" style={{ WebkitAppRegion: "drag" } as React.CSSProperties}>
 
-      {/* window control buttons */}
-      <div className="flex items-center gap-2 mr-6" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
-        <button className="w-3 h-3 rounded-full bg-foreground hover:opacity-70 transition-all" />
-        <button className="w-3 h-3 rounded-full border border-foreground hover:bg-foreground/20 transition-all" />
-        <button className="w-3 h-3 rounded-full border border-foreground hover:bg-foreground/20 transition-all" />
-      </div>
+      {/* Left spacer for native traffic lights */}
+      <div className="w-20" />
 
-      {/* title */}
+      {/* title and project info */}
       <div className="flex-1 flex items-center justify-center">
         <span className="text-sm font-medium text-muted-foreground">0studio</span>
-        <span className="text-xs text-muted-foreground/60 ml-2">demo.3dm</span>
+        {currentProject && projectName ? (
+          <>
+            <span className="text-xs text-muted-foreground/60 ml-2">—</span>
+            <span className="text-sm text-foreground ml-2">{projectName}</span>
+            {isGitRepo && (
+              <Circle className="w-2 h-2 fill-green-500 text-green-500 ml-2" />
+            )}
+          </>
+        ) : (
+          <span className="text-xs text-muted-foreground/60 ml-2">No project open</span>
+        )}
       </div>
 
-      {/* spacer for symmetry */}
-      <div className="w-16" />
+      {/* Right spacer for symmetry */}
+      <div className="w-20" />
     </div>
   );
 };
