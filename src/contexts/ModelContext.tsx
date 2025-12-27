@@ -12,7 +12,24 @@ import {
   exportTo3dm,
   Rhino3dmMetadata,
 } from "@/lib/rhino3dm-service";
-import type { SerializedObject } from "@/contexts/VersionControlContext";
+
+// Serializable representation of a 3D object for storage
+export interface SerializedObject {
+  id: string;
+  type: 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'plane';
+  name: string;
+  color: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+  params?: {
+    size?: number;
+    width?: number;
+    height?: number;
+    depth?: number;
+    radius?: number;
+  };
+}
 
 export interface SceneStats {
   curves: number;
@@ -43,6 +60,8 @@ export interface GeneratedObject {
 interface ModelContextType {
   // State
   loadedModel: LoadedModel | null;
+  currentFile: string | null;
+  fileName: string | null;
   isLoading: boolean;
   isExporting: boolean;
   error: string | null;
@@ -90,6 +109,8 @@ const ModelContext = createContext<ModelContextType | null>(null);
 
 export function ModelProvider({ children }: { children: ReactNode }) {
   const [loadedModel, setLoadedModel] = useState<LoadedModel | null>(null);
+  const [currentFile, setCurrentFile] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -293,6 +314,11 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     try {
       const result = await load3dmFile(file);
       setLoadedModel(result);
+      
+      // Set current file info for version control
+      setCurrentFile(file.name); // In a real app, this would be the file path
+      setFileName(file.name);
+      
     } catch (err) {
       console.error("Failed to load 3DM file:", err);
       setError(err instanceof Error ? err.message : "Failed to load file");
@@ -457,6 +483,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     <ModelContext.Provider
       value={{
         loadedModel,
+        currentFile,
+        fileName,
         isLoading,
         isExporting,
         error,

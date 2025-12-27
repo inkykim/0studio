@@ -1,188 +1,150 @@
-import { GitBranch, FileText, Plus, Minus, RefreshCw, RotateCcw, FolderOpen, GitCommit, Upload, Download, Settings } from "lucide-react";
+import { Archive, Clock, RotateCcw, Save, FolderOpen, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { useVersionControl, FileChange } from "@/contexts/VersionControlContext";
-import { useModel } from "@/contexts/ModelContext";
-import { useState } from "react";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { useState, useEffect } from "react";
+import { useModel } from "@/contexts/ModelContext";
+import { useVersionControl } from "@/contexts/VersionControlContext";
 
-const StatusIcon = ({ status }: { status: FileChange["status"] }) => {
-  switch (status) {
-    case "added":
-      return <Plus className="w-3.5 h-3.5 text-green-600" />;
-    case "modified":
-      return <RefreshCw className="w-3.5 h-3.5 text-blue-600" />;
-    case "deleted":
-      return <Minus className="w-3.5 h-3.5 text-red-600" />;
-    case "staged":
-      return <GitCommit className="w-3.5 h-3.5 text-yellow-600" />;
-    case "untracked":
-      return <Plus className="w-3.5 h-3.5 text-gray-600" />;
-    default:
-      return <FileText className="w-3.5 h-3.5 text-muted-foreground" />;
-  }
+const formatTimeAgo = (timestamp: number) => {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const minutes = Math.floor(diff / (1000 * 60));
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+  if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  return `${days} day${days > 1 ? 's' : ''} ago`;
 };
 
 export const VersionControl = () => {
+  const { currentFile, fileName, clearModel, triggerFileDialog } = useModel();
   const { 
-    currentProject, 
-    projectName, 
-    isGitRepo,
-    gitStatus,
-    gitCommits,
-    currentBranch,
-    stagedChanges, 
-    unstagedChanges, 
+    currentModel, 
+    modelName, 
     commits, 
     currentCommitId, 
-    openProject,
-    initRepository,
-    commitChanges,
-    pushChanges,
-    pullChanges,
-    checkoutCommit,
-    restoreCommit,
-    hasUnstagedChanges,
-    hasStagedChanges
+    hasUnsavedChanges, 
+    setCurrentModel,
+    commitModelChanges,
+    restoreToCommit,
+    markUnsavedChanges,
+    clearCurrentModel
   } = useVersionControl();
   
-  const { restoreScene } = useModel();
   const [commitMessage, setCommitMessage] = useState("");
   const [isCommitting, setIsCommitting] = useState(false);
 
-  const handleRestoreCommit = (commitId: string) => {
-    const sceneState = restoreCommit(commitId);
-    if (sceneState) {
-      restoreScene(sceneState);
+  // When a model file is loaded, update the version control
+  useEffect(() => {
+    if (currentFile && currentFile !== currentModel) {
+      setCurrentModel(currentFile);
     }
-  };
+  }, [currentFile, currentModel, setCurrentModel]);
 
-  const handleGitCheckout = async (commitHash: string) => {
+  const handleRestoreCommit = async (commitId: string) => {
     try {
-      await checkoutCommit(commitHash);
+      const success = await restoreToCommit(commitId);
+      if (success) {
+        console.log(`Model restored to commit: ${commitId}`);
+      }
     } catch (error) {
-      console.error("Failed to checkout commit:", error);
+      console.error("Failed to restore commit:", error);
     }
   };
 
   const handleCommit = async () => {
-    if (!commitMessage.trim() || isCommitting) return;
+    if (!commitMessage.trim() || isCommitting || !hasUnsavedChanges) return;
     
     setIsCommitting(true);
     try {
-      await commitChanges(commitMessage.trim());
+      await commitModelChanges(commitMessage.trim());
       setCommitMessage("");
     } catch (error) {
-      console.error("Failed to commit:", error);
+      console.error("Failed to commit model:", error);
     } finally {
       setIsCommitting(false);
     }
   };
 
-  const handlePush = async () => {
-    try {
-      await pushChanges();
-    } catch (error) {
-      console.error("Failed to push:", error);
-    }
+  const handleCloseModel = () => {
+    clearModel();
+    clearCurrentModel();
   };
 
-  const handlePull = async () => {
-    try {
-      await pullChanges();
-    } catch (error) {
-      console.error("Failed to pull:", error);
-    }
+  const handleOpenNewModel = () => {
+    triggerFileDialog();
   };
 
-  // If no project is open, show open project UI
-  if (!currentProject) {
+  // If no model is open, show open model UI
+  if (!currentFile) {
     return (
       <div className="h-full flex flex-col panel-glass">
         <div className="panel-header flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-primary" />
-            <span className="font-medium text-sm">Source Control</span>
+            <Archive className="w-4 h-4 text-primary" />
+            <span className="font-medium text-sm">Version Control</span>
           </div>
         </div>
         
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <FolderOpen className="w-12 h-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium mb-2">No Project Open</h3>
+          <Archive className="w-12 h-12 text-muted-foreground mb-4" />
+          <h3 className="text-lg font-medium mb-2">No Model Open</h3>
           <p className="text-sm text-muted-foreground mb-6">
-            Open a .3dm file to start version control for your 3D model.
+            Open a .3dm file to start tracking versions of your 3D model.
           </p>
-          <Button onClick={openProject} className="gap-2">
-            <FolderOpen className="w-4 h-4" />
-            Open .3dm Project
-          </Button>
+          <p className="text-xs text-muted-foreground">
+            Use the Model Viewer tab to import a .3dm file
+          </p>
         </div>
       </div>
     );
   }
-
-  // If project is open but no git repo, show initialization UI
-  if (!isGitRepo) {
-    return (
-      <div className="h-full flex flex-col panel-glass">
-        <div className="panel-header flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-primary" />
-            <span className="font-medium text-sm">Source Control</span>
-          </div>
-        </div>
-        
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <Settings className="w-12 h-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium mb-2">Initialize Repository</h3>
-          <p className="text-sm text-muted-foreground mb-6">
-            Initialize a Git repository to start tracking versions of <strong>{projectName}</strong>.
-          </p>
-          <Button onClick={initRepository} className="gap-2">
-            <GitBranch className="w-4 h-4" />
-            Initialize Git Repository
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const displayCommits = gitCommits.length > 0 ? gitCommits : commits;
-  const displayUnstaged = gitStatus?.files.filter(f => !f.staged) || unstagedChanges;
-  const displayStaged = gitStatus?.files.filter(f => f.staged) || stagedChanges;
 
   return (
     <div className="h-full flex flex-col panel-glass">
       {/* Header */}
       <div className="panel-header flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <GitBranch className="w-4 h-4 text-primary" />
-          <span className="font-medium text-sm">Source Control</span>
+          <Archive className="w-4 h-4 text-primary" />
+          <span className="font-medium text-sm">Version Control</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 text-code text-muted-foreground">
-            <span>{currentBranch}</span>
-          </div>
-          <div className="flex gap-1">
-            <Button variant="ghost" size="sm" onClick={handlePull} className="h-6 px-2">
-              <Download className="w-3 h-3" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={handlePush} className="h-6 px-2">
-              <Upload className="w-3 h-3" />
-            </Button>
-          </div>
+        <div className="flex items-center gap-1">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleOpenNewModel}
+            className="h-6 px-2"
+            title="Open new model"
+          >
+            <FolderOpen className="w-3 h-3" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleCloseModel}
+            className="h-6 px-2"
+            title="Close model"
+          >
+            <X className="w-3 h-3" />
+          </Button>
         </div>
       </div>
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-6">
           {/* Commit Input */}
-          {(displayUnstaged.length > 0 || displayStaged.length > 0) && (
+          {hasUnsavedChanges && (
             <section>
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+                Save New Version
+              </h3>
               <div className="space-y-2">
                 <Input
-                  placeholder="Commit message..."
+                  placeholder="Describe these changes..."
                   value={commitMessage}
                   onChange={(e) => setCommitMessage(e.target.value)}
                   onKeyDown={(e) => {
@@ -196,115 +158,92 @@ export const VersionControl = () => {
                   disabled={!commitMessage.trim() || isCommitting}
                   className="w-full gap-2"
                 >
-                  <GitCommit className="w-4 h-4" />
-                  {isCommitting ? "Committing..." : "Commit Changes"}
+                  <Save className="w-4 h-4" />
+                  {isCommitting ? "Saving Version..." : "Save Version"}
                 </Button>
               </div>
             </section>
           )}
 
-          {/* Unstaged Changes */}
-          <section>
-            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-              Changes ({displayUnstaged.length})
-            </h3>
-            <div className="space-y-1">
-              {displayUnstaged.length === 0 ? (
-                <p className="text-xs text-muted-foreground px-2">No changes</p>
-              ) : (
-                displayUnstaged.map((file, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/50 transition-colors cursor-pointer group"
-                  >
-                    <StatusIcon status={file.status} />
-                    <FileText className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-code text-sm flex-1 truncate">{file.name || file.path}</span>
-                    <span className="text-code text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                      {file.status}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
+          {/* Current Status */}
+          {!hasUnsavedChanges && (
+            <section>
+              <div className="text-center py-6">
+                <Clock className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">
+                  No unsaved changes
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Make changes to your model file to create a new version
+                </p>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => markUnsavedChanges()} 
+                  className="mt-3"
+                >
+                  Simulate Changes
+                </Button>
+              </div>
+            </section>
+          )}
 
-          {/* Staged Changes */}
+          {/* Version History */}
           <section>
             <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-              Staged Changes ({displayStaged.length})
-            </h3>
-            <div className="space-y-1">
-              {displayStaged.length === 0 ? (
-                <p className="text-xs text-muted-foreground px-2">No staged changes</p>
-              ) : (
-                displayStaged.map((file, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-secondary/50 transition-colors cursor-pointer group"
-                  >
-                    <StatusIcon status={file.status} />
-                    <FileText className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-code text-sm flex-1 truncate">{file.name || file.path}</span>
-                    <span className="text-code text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                      staged
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          {/* Commit History */}
-          <section>
-            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-              Commit History
+              Version History ({commits.length})
             </h3>
             <div className="relative">
-              {displayCommits.length === 0 ? (
-                <p className="text-xs text-muted-foreground px-2">No commits yet</p>
+              {commits.length === 0 ? (
+                <div className="text-center py-4">
+                  <p className="text-xs text-muted-foreground">No versions saved yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Save your first version to start tracking changes</p>
+                </div>
               ) : (
-                displayCommits.map((commit, idx) => {
-                  const commitId = commit.hash || commit.id;
-                  const isCurrentCommit = commitId === currentCommitId || idx === 0;
+                commits.map((commit, idx) => {
+                  const isCurrentCommit = commit.id === currentCommitId;
                   return (
                     <div 
-                      key={commitId} 
-                      className={`flex gap-3 group cursor-pointer rounded-md transition-colors ${
+                      key={commit.id} 
+                      className={`flex gap-3 group cursor-pointer rounded-md p-2 transition-colors ${
                         isCurrentCommit ? 'bg-primary/10' : 'hover:bg-secondary/50'
                       }`}
-                      onClick={() => gitCommits.length > 0 ? handleGitCheckout(commitId) : handleRestoreCommit(commitId)}
-                      title={isCurrentCommit ? 'Current state' : 'Click to restore this commit'}
+                      onClick={() => !isCurrentCommit && handleRestoreCommit(commit.id)}
+                      title={isCurrentCommit ? 'Current version' : 'Click to restore to this version'}
                     >
                       {/* Timeline */}
                       <div className="flex flex-col items-center">
-                        <div className={`commit-dot mt-1.5 ${isCurrentCommit ? 'bg-primary' : ''}`} />
-                        {idx < displayCommits.length - 1 && <div className="commit-line my-1" style={{ minHeight: "32px" }} />}
+                        <div className={`w-2 h-2 rounded-full mt-1.5 ${
+                          isCurrentCommit ? 'bg-primary' : 'bg-muted-foreground/40'
+                        }`} />
+                        {idx < commits.length - 1 && (
+                          <div className="w-px bg-border my-1" style={{ minHeight: "32px" }} />
+                        )}
                       </div>
                       
                       {/* Content */}
-                      <div className="flex-1 pb-4 min-w-0 pr-2">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">{commit.message}</p>
                             {isCurrentCommit && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary shrink-0">
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
                                 current
-                              </span>
+                              </Badge>
                             )}
                           </div>
                           <span className="text-code text-xs text-muted-foreground shrink-0">
-                            {(commit.hash || commit.id).substring(0, 7)}
+                            v{commits.length - idx}
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {commit.author} • {commit.time || commit.date}
+                          {formatTimeAgo(commit.timestamp)}
                         </p>
                       </div>
                       
                       {/* Restore indicator on hover */}
                       {!isCurrentCommit && (
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center pr-2">
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center">
                           <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
                         </div>
                       )}

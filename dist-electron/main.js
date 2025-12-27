@@ -59,7 +59,7 @@ class RhinoStudio {
             webPreferences: {
                 nodeIntegration: false,
                 contextIsolation: true,
-                preload: join(__dirname, 'preload.js'),
+                preload: join(__dirname, 'preload.cjs'),
             },
             titleBarStyle: 'hiddenInset',
             trafficLightPosition: { x: 20, y: 20 },
@@ -213,7 +213,7 @@ class RhinoStudio {
         await this.startFileWatching();
         // Update window title
         if (this.mainWindow) {
-            this.mainWindow.setTitle(`Rhino Studio - ${basename(filePath)}`);
+            this.mainWindow.setTitle(`0studio - ${basename(filePath)}`);
         }
         // Notify renderer process
         this.mainWindow?.webContents.send('project-opened', {
@@ -227,7 +227,7 @@ class RhinoStudio {
         this.gitService = null;
         await this.stopFileWatching();
         if (this.mainWindow) {
-            this.mainWindow.setTitle('Rhino Studio');
+            this.mainWindow.setTitle('0studio');
         }
         this.mainWindow?.webContents.send('project-closed');
     }

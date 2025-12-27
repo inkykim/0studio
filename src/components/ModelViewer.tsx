@@ -6,6 +6,7 @@ import {
   FileBox,
   X,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useModel, SceneStats, GeneratedObject } from "@/contexts/ModelContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -353,8 +354,6 @@ function SceneContent({
     onSceneReady(scene);
   }, [scene, onSceneReady]);
 
-  const hasContent = loadedModel || generatedObjects.length > 0;
-
   return (
     <>
       {loadedModel && <LoadedObjects objects={loadedModel.objects} />}
@@ -376,6 +375,10 @@ export const ModelViewer = () => {
     stats,
     clearError,
     setSceneRef,
+    importFile,
+    isLoading,
+    fileInputRef,
+    triggerFileDialog,
   } = useModel();
 
   const [isDragOver, setIsDragOver] = useState(false);
@@ -384,21 +387,102 @@ export const ModelViewer = () => {
     setSceneRef(scene);
   }, [setSceneRef]);
 
+  // Handle file input change
+  const handleFileInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (file) {
+        importFile(file);
+        // Clear the input to allow re-importing the same file
+        event.target.value = "";
+      }
+    },
+    [importFile]
+  );
+
+  // Handle drag and drop
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.relatedTarget === null || !e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(false);
+      
+      const files = Array.from(e.dataTransfer.files);
+      const file = files.find(f => f.name.toLowerCase().endsWith('.3dm'));
+      
+      if (file) {
+        importFile(file);
+      }
+    },
+    [importFile]
+  );
+
 
 
 
 
   return (
     <TooltipProvider>
-      <div className="h-full flex flex-col panel-glass relative">
+      <div 
+        className="h-full flex flex-col panel-glass relative"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".3dm"
+          onChange={handleFileInputChange}
+          className="hidden"
+        />
 
-        {/* Loaded file info */}
-        {loadedModel && (
-          <div className="absolute top-3 right-3 z-10 flex items-center gap-2 px-3 py-1.5 bg-secondary/80 backdrop-blur-sm rounded-md">
-            <FileBox className="w-4 h-4 text-primary" />
-            <span className="text-xs text-muted-foreground">
-              {loadedModel.metadata.fileName}
-            </span>
+        {/* Drag overlay */}
+        {isDragOver && (
+          <div className="absolute inset-0 z-50 bg-primary/20 border-2 border-dashed border-primary rounded-lg flex items-center justify-center backdrop-blur-sm">
+            <div className="text-center">
+              <FileBox className="w-12 h-12 text-primary mx-auto mb-2" />
+              <p className="text-lg font-medium text-primary">Drop .3dm file here</p>
+            </div>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!loadedModel && !isLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center">
+            <div className="text-center p-8">
+              <FileBox className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-xl font-medium mb-2">Import 3D Model</h3>
+              <p className="text-muted-foreground mb-6">
+                Drag & drop a .3dm file here or click to browse
+              </p>
+              <Button onClick={triggerFileDialog} className="gap-2">
+                <FileBox className="w-4 h-4" />
+                Choose File
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Loading state */}
+        {isLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 backdrop-blur-sm">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+              <p className="text-sm text-muted-foreground">Loading model...</p>
+            </div>
           </div>
         )}
 
