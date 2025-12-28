@@ -198,6 +198,8 @@ class RhinoStudio {
     // File watching
     ipcMain.handle('start-file-watching', () => this.startFileWatching());
     ipcMain.handle('stop-file-watching', () => this.stopFileWatching());
+    ipcMain.handle('set-current-file', (_, filePath: string) => this.setCurrentFile(filePath));
+    ipcMain.handle('read-file-buffer', (_, filePath: string) => this.readFileBuffer(filePath));
   }
 
   private async openProjectDialog(): Promise<string | null> {
@@ -278,6 +280,16 @@ class RhinoStudio {
       this.fileWatcher.stop();
       this.fileWatcher = null;
     }
+  }
+
+  private setCurrentFile(filePath: string): void {
+    this.currentProjectFile = filePath;
+  }
+
+  private async readFileBuffer(filePath: string): Promise<ArrayBuffer> {
+    const fs = await import('fs/promises');
+    const buffer = await fs.readFile(filePath);
+    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
   }
 
   private async saveModelVersion(): Promise<void> {

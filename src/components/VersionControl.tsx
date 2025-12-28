@@ -21,7 +21,7 @@ const formatTimeAgo = (timestamp: number) => {
 };
 
 export const VersionControl = () => {
-  const { currentFile, fileName, clearModel, triggerFileDialog } = useModel();
+  const { currentFile, fileName, clearModel, triggerFileDialog, loadedModel } = useModel();
   const { 
     currentModel, 
     modelName, 
@@ -57,11 +57,11 @@ export const VersionControl = () => {
   };
 
   const handleCommit = async () => {
-    if (!commitMessage.trim() || isCommitting || !hasUnsavedChanges) return;
+    if (!commitMessage.trim() || isCommitting || !hasUnsavedChanges || !loadedModel) return;
     
     setIsCommitting(true);
     try {
-      await commitModelChanges(commitMessage.trim());
+      await commitModelChanges(commitMessage.trim(), loadedModel);
       setCommitMessage("");
     } catch (error) {
       console.error("Failed to commit model:", error);

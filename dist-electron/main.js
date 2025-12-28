@@ -3,7 +3,6 @@ import { join, dirname, basename } from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { FileWatcherService } from './services/file-watcher.js';
-import { GitService } from './services/git-service.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 class RhinoStudio {
@@ -105,40 +104,41 @@ class RhinoStudio {
                 label: 'File',
                 submenu: [
                     {
-                        label: 'Open .3dm Project...',
+                        label: 'Open .3dm Model...',
                         accelerator: 'CmdOrCtrl+O',
                         click: () => this.openProjectDialog()
                     },
                     {
-                        label: 'Close Project',
+                        label: 'Close Model',
                         accelerator: 'CmdOrCtrl+W',
                         click: () => this.closeProject()
                     },
                     { type: 'separator' },
                     {
-                        label: 'Commit Changes...',
-                        accelerator: 'CmdOrCtrl+Shift+C',
-                        click: () => this.commitChanges()
+                        label: 'Export Model...',
+                        accelerator: 'CmdOrCtrl+E',
+                        click: () => this.exportModel()
                     }
                 ]
             },
             {
-                label: 'Version Control',
+                label: 'Model',
                 submenu: [
                     {
-                        label: 'Initialize Repository',
-                        click: () => this.initializeRepository()
+                        label: 'Save Version...',
+                        accelerator: 'CmdOrCtrl+Shift+S',
+                        click: () => this.saveModelVersion()
                     },
                     { type: 'separator' },
                     {
-                        label: 'Pull Changes',
-                        accelerator: 'CmdOrCtrl+Shift+P',
-                        click: () => this.pullChanges()
+                        label: 'Show Version History',
+                        accelerator: 'CmdOrCtrl+Shift+H',
+                        click: () => this.showVersionHistory()
                     },
                     {
-                        label: 'Push Changes',
-                        accelerator: 'CmdOrCtrl+Shift+U',
-                        click: () => this.pushChanges()
+                        label: 'Simulate Changes',
+                        accelerator: 'CmdOrCtrl+Shift+T',
+                        click: () => this.simulateChanges()
                     }
                 ]
             },
@@ -168,25 +168,24 @@ class RhinoStudio {
         Menu.setApplicationMenu(menu);
     }
     setupIPC() {
-        // Project management
+        // Model management
         ipcMain.handle('open-project-dialog', () => this.openProjectDialog());
         ipcMain.handle('get-current-project', () => this.getCurrentProject());
         ipcMain.handle('close-project', () => this.closeProject());
-        // Version control
-        ipcMain.handle('git-init', (_, projectPath) => this.gitService?.init(projectPath));
-        ipcMain.handle('git-status', () => this.gitService?.getStatus());
-        ipcMain.handle('git-commit', (_, message, files) => this.gitService?.commit(message, files));
-        ipcMain.handle('git-push', () => this.gitService?.push());
-        ipcMain.handle('git-pull', () => this.gitService?.pull());
-        ipcMain.handle('git-log', () => this.gitService?.getLog());
-        ipcMain.handle('git-checkout', (_, commitHash) => this.gitService?.checkout(commitHash));
+        // Model version control
+        ipcMain.handle('save-model-version', () => this.saveModelVersion());
+        ipcMain.handle('show-version-history', () => this.showVersionHistory());
+        ipcMain.handle('simulate-changes', () => this.simulateChanges());
+        ipcMain.handle('export-model', () => this.exportModel());
         // File watching
         ipcMain.handle('start-file-watching', () => this.startFileWatching());
         ipcMain.handle('stop-file-watching', () => this.stopFileWatching());
+        ipcMain.handle('set-current-file', (_, filePath) => this.setCurrentFile(filePath));
+        ipcMain.handle('read-file-buffer', (_, filePath) => this.readFileBuffer(filePath));
     }
     async openProjectDialog() {
         const result = await dialog.showOpenDialog(this.mainWindow, {
-            title: 'Open .3dm Project',
+            title: 'Open .3dm Model',
             filters: [
                 { name: 'Rhino 3D Models', extensions: ['3dm'] },
                 { name: 'All Files', extensions: ['*'] }
@@ -206,9 +205,6 @@ class RhinoStudio {
             return;
         }
         this.currentProjectFile = filePath;
-        const projectDir = dirname(filePath);
-        // Initialize Git service for this project
-        this.gitService = new GitService(projectDir);
         // Start file watching
         await this.startFileWatching();
         // Update window title
@@ -218,13 +214,11 @@ class RhinoStudio {
         // Notify renderer process
         this.mainWindow?.webContents.send('project-opened', {
             filePath,
-            projectDir,
             fileName: basename(filePath)
         });
     }
     async closeProject() {
         this.currentProjectFile = null;
-        this.gitService = null;
         await this.stopFileWatching();
         if (this.mainWindow) {
             this.mainWindow.setTitle('0studio');
@@ -234,7 +228,6 @@ class RhinoStudio {
     getCurrentProject() {
         return this.currentProjectFile ? {
             filePath: this.currentProjectFile,
-            projectDir: dirname(this.currentProjectFile),
             fileName: basename(this.currentProjectFile)
         } : null;
     }
@@ -256,56 +249,41 @@ class RhinoStudio {
             this.fileWatcher = null;
         }
     }
-    async initializeRepository() {
+    setCurrentFile(filePath) {
+        this.currentProjectFile = filePath;
+    }
+    async readFileBuffer(filePath) {
+        const fs = await import('fs/promises');
+        const buffer = await fs.readFile(filePath);
+        return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    }
+    async saveModelVersion() {
         if (!this.currentProjectFile) {
-            dialog.showErrorBox('Error', 'No project is currently open.');
+            dialog.showErrorBox('Error', 'No model is currently open.');
             return;
         }
-        const projectDir = dirname(this.currentProjectFile);
-        try {
-            await this.gitService?.init(projectDir);
-            dialog.showMessageBox(this.mainWindow, {
-                type: 'info',
-                title: 'Repository Initialized',
-                message: 'Git repository has been initialized for this project.'
-            });
-        }
-        catch (error) {
-            dialog.showErrorBox('Error', `Failed to initialize repository: ${error}`);
-        }
+        this.mainWindow?.webContents.send('show-save-version-dialog');
     }
-    async commitChanges() {
-        if (!this.gitService) {
-            dialog.showErrorBox('Error', 'No project is currently open.');
+    async showVersionHistory() {
+        if (!this.currentProjectFile) {
+            dialog.showErrorBox('Error', 'No model is currently open.');
             return;
         }
-        this.mainWindow?.webContents.send('show-commit-dialog');
+        this.mainWindow?.webContents.send('show-version-history');
     }
-    async pullChanges() {
-        if (!this.gitService) {
-            dialog.showErrorBox('Error', 'No project is currently open.');
+    async simulateChanges() {
+        if (!this.currentProjectFile) {
+            dialog.showErrorBox('Error', 'No model is currently open.');
             return;
         }
-        try {
-            await this.gitService.pull();
-            this.mainWindow?.webContents.send('git-operation-complete', 'pull');
-        }
-        catch (error) {
-            dialog.showErrorBox('Error', `Failed to pull changes: ${error}`);
-        }
+        this.mainWindow?.webContents.send('simulate-model-changes');
     }
-    async pushChanges() {
-        if (!this.gitService) {
-            dialog.showErrorBox('Error', 'No project is currently open.');
+    async exportModel() {
+        if (!this.currentProjectFile) {
+            dialog.showErrorBox('Error', 'No model is currently open.');
             return;
         }
-        try {
-            await this.gitService.push();
-            this.mainWindow?.webContents.send('git-operation-complete', 'push');
-        }
-        catch (error) {
-            dialog.showErrorBox('Error', `Failed to push changes: ${error}`);
-        }
+        this.mainWindow?.webContents.send('export-model');
     }
 }
 // Create the app instance

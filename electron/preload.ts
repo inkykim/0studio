@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File watching
   startFileWatching: () => ipcRenderer.invoke('start-file-watching'),
   stopFileWatching: () => ipcRenderer.invoke('stop-file-watching'),
+  setCurrentFile: (filePath: string) => ipcRenderer.invoke('set-current-file', filePath),
+  readFileBuffer: (filePath: string) => ipcRenderer.invoke('read-file-buffer', filePath),
 
   // Event listeners
   onProjectOpened: (callback: (project: ProjectInfo) => void) => {
@@ -95,6 +97,8 @@ declare global {
       
       startFileWatching: () => Promise<void>;
       stopFileWatching: () => Promise<void>;
+      setCurrentFile: (filePath: string) => Promise<void>;
+      readFileBuffer: (filePath: string) => Promise<ArrayBuffer>;
       
       onProjectOpened: (callback: (project: ProjectInfo) => void) => void;
       onProjectClosed: (callback: () => void) => void;

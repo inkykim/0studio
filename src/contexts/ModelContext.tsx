@@ -5,6 +5,7 @@ import {
   useCallback,
   useRef,
   ReactNode,
+  useEffect,
 } from "react";
 import * as THREE from "three";
 import {
@@ -12,6 +13,8 @@ import {
   exportTo3dm,
   Rhino3dmMetadata,
 } from "@/lib/rhino3dm-service";
+import { desktopAPI } from "@/lib/desktop-api";
+import { useVersionControl } from "./VersionControlContext";
 
 // Serializable representation of a 3D object for storage
 export interface SerializedObject {
@@ -67,6 +70,7 @@ interface ModelContextType {
   error: string | null;
   stats: SceneStats;
   generatedObjects: GeneratedObject[];
+  lastFileChangeTime: string | null;
   
   // Actions
   importFile: (file: File) => Promise<void>;
@@ -114,6 +118,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastFileChangeTime, setLastFileChangeTime] = useState<string | null>(null);
   const [stats, setStats] = useState<SceneStats>({
     curves: 0,
     surfaces: 0,
@@ -123,6 +128,89 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   
   const sceneRef = useRef<THREE.Scene | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Get version control functions
+  const { markUnsavedChanges, setModelRestoreCallback, createInitialCommit } = useVersionControl();
+
+  // Set up model restore callback for version control
+  useEffect(() => {
+    const handleModelRestore = (modelData: LoadedModel) => {
+      console.log('Restoring model from version control:', modelData);
+      setLoadedModel(modelData);
+      setStats(modelData.stats);
+    };
+
+    setModelRestoreCallback(handleModelRestore);
+  }, [setModelRestoreCallback]);
+
+  // File change detection and handling
+  useEffect(() => {
+    if (!desktopAPI.isDesktop) return;
+
+    const handleFileChange = (event: any) => {
+      console.log('3DM file changed on disk:', event);
+      
+      if (event.eventType === 'change' && event.filePath && event.filePath === currentFile) {
+        // File was modified - reload the model automatically
+        const changeTime = new Date().toLocaleTimeString();
+        setLastFileChangeTime(changeTime);
+        console.log(`Model file changed at ${changeTime}`);
+        
+        reloadModelFromDisk();
+      }
+    };
+
+    // Set up file change listener
+    desktopAPI.onFileChanged(handleFileChange);
+
+    // Cleanup
+    return () => {
+      desktopAPI.removeAllListeners('file-changed');
+    };
+  }, [currentFile]); // Re-setup when current file changes
+
+  const reloadModelFromDisk = useCallback(async () => {
+    if (!currentFile) return;
+
+    console.log('Reloading model from disk:', currentFile);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      if (desktopAPI.isDesktop) {
+        // In Electron, read the file using IPC
+        const arrayBuffer = await desktopAPI.readFileBuffer(currentFile);
+        if (!arrayBuffer) {
+          console.warn('Failed to read file buffer');
+          return;
+        }
+        
+        const fileName = currentFile.split('/').pop() || 'model.3dm';
+        const file = new File([arrayBuffer], fileName, { type: 'application/octet-stream' });
+        
+        // Load the updated model
+        const result = await load3dmFile(file);
+        setLoadedModel(result);
+        setStats(result.stats);
+        
+        console.log('Model successfully reloaded from disk with updated geometry');
+      } else {
+        // In browser mode, we can't reload from disk
+        console.log('Model file was updated externally (browser mode - cannot reload)');
+      }
+      
+      // Mark as having unsaved changes
+      if (markUnsavedChanges) {
+        markUnsavedChanges();
+      }
+      
+    } catch (err) {
+      console.error("Failed to reload model from disk:", err);
+      setError(err instanceof Error ? err.message : "Failed to reload model");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentFile, markUnsavedChanges]);
 
   const setSceneRef = useCallback((scene: THREE.Scene | null) => {
     sceneRef.current = scene;
@@ -316,8 +404,42 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       setLoadedModel(result);
       
       // Set current file info for version control
-      setCurrentFile(file.name); // In a real app, this would be the file path
+      let filePath: string;
+      
+      if (desktopAPI.isDesktop) {
+        // In Electron, create a path that represents where the file might be saved
+        // For testing, you can create a real .3dm file at this path and modify it
+        filePath = `/Users/CKim23/Desktop/${file.name}`;
+        
+        // Inform Electron about the current file path for watching
+        try {
+          await desktopAPI.setCurrentFile(filePath);
+          console.log('Set current file for watching:', filePath);
+          console.log('To test file watching, save a .3dm file to this location and modify it');
+        } catch (err) {
+          console.warn('Failed to set current file:', err);
+        }
+      } else {
+        // In browser mode, we only have the file name
+        filePath = file.name;
+      }
+      
+      setCurrentFile(filePath);
       setFileName(file.name);
+      
+      // Start file watching if in Electron
+      if (desktopAPI.isDesktop) {
+        try {
+          await desktopAPI.startFileWatching();
+          console.log('Started watching file for changes');
+        } catch (err) {
+          console.warn('Failed to start file watching:', err);
+        }
+      }
+
+      // Create initial commit for version control
+      createInitialCommit(result);
+      console.log('Created initial commit for imported model');
       
     } catch (err) {
       console.error("Failed to load 3DM file:", err);
@@ -325,7 +447,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [createInitialCommit]);
 
   const exportScene = useCallback(async (filename?: string) => {
     if (!sceneRef.current) {
@@ -349,8 +471,20 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     }
   }, [loadedModel]);
 
-  const clearModel = useCallback(() => {
+  const clearModel = useCallback(async () => {
+    // Stop file watching if in Electron
+    if (desktopAPI.isDesktop) {
+      try {
+        await desktopAPI.stopFileWatching();
+        console.log('Stopped watching file');
+      } catch (err) {
+        console.warn('Failed to stop file watching:', err);
+      }
+    }
+    
     setLoadedModel(null);
+    setCurrentFile(null);
+    setFileName(null);
     setError(null);
   }, []);
 
@@ -490,6 +624,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         error,
         stats,
         generatedObjects,
+        lastFileChangeTime,
         importFile,
         exportScene,
         clearModel,

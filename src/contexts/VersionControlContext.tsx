@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
+import { desktopAPI } from "@/lib/desktop-api";
+import { LoadedModel } from "./ModelContext";
 
 interface ModelCommit {
   id: string;
   message: string;
   timestamp: number;
-  modelData?: any; // Will store serialized model data
+  modelData?: LoadedModel; // Store the actual model data
 }
 
 interface VersionControlContextType {
@@ -17,11 +19,16 @@ interface VersionControlContextType {
   
   // Actions
   setCurrentModel: (path: string) => void;
-  commitModelChanges: (message: string) => Promise<void>;
+  commitModelChanges: (message: string, currentModelData?: LoadedModel) => Promise<void>;
+  createInitialCommit: (modelData: LoadedModel) => void;
   restoreToCommit: (commitId: string) => Promise<boolean>;
   markUnsavedChanges: () => void;
   clearUnsavedChanges: () => void;
   clearCurrentModel: () => void;
+  
+  // Model restoration callback - will be set by ModelContext
+  onModelRestore?: (modelData: LoadedModel) => void;
+  setModelRestoreCallback: (callback: (modelData: LoadedModel) => void) => void;
 }
 
 const VersionControlContext = createContext<VersionControlContextType | undefined>(undefined);
@@ -36,6 +43,11 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [commits, setCommits] = useState<ModelCommit[]>([]);
   const [currentCommitId, setCurrentCommitId] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [onModelRestore, setOnModelRestore] = useState<((modelData: LoadedModel) => void) | undefined>(undefined);
+
+  const setModelRestoreCallback = useCallback((callback: (modelData: LoadedModel) => void) => {
+    setOnModelRestore(() => callback);
+  }, []);
 
   const setCurrentModel = useCallback((path: string) => {
     setCurrentModelState(path);
@@ -44,33 +56,69 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     const fileName = path.split('/').pop() || path;
     setModelName(fileName);
     
-    // Initialize with first commit if no commits exist
-    if (commits.length === 0) {
-      const initialCommit: ModelCommit = {
-        id: Date.now().toString(),
-        message: "Initial model import",
-        timestamp: Date.now(),
-      };
-      setCommits([initialCommit]);
-      setCurrentCommitId(initialCommit.id);
-    }
-    
-    // Clear unsaved changes when switching models
+    // Clear unsaved changes only when switching to a different model
+    console.log('Model switched, clearing unsaved changes for new model:', path);
     setHasUnsavedChanges(false);
-  }, [commits.length]);
+  }, []); // Removed initial commit creation - will be done when model loads
 
-  const commitModelChanges = useCallback(async (message: string): Promise<void> => {
+  const createInitialCommit = useCallback((modelData: LoadedModel) => {
+    // Only create initial commit if no commits exist
+    setCommits(prevCommits => {
+      if (prevCommits.length === 0) {
+        const initialCommit: ModelCommit = {
+          id: Date.now().toString(),
+          message: "Initial model import",
+          timestamp: Date.now(),
+          modelData: modelData,
+        };
+        setCurrentCommitId(initialCommit.id);
+        console.log("Created initial commit with model data:", initialCommit);
+        return [initialCommit];
+      }
+      return prevCommits;
+    });
+  }, []);
+
+  // Debug: Track hasUnsavedChanges state changes
+  useEffect(() => {
+    console.log('hasUnsavedChanges state changed to:', hasUnsavedChanges);
+  }, [hasUnsavedChanges]);
+
+  // File change detection - mark unsaved changes when file changes on disk
+  useEffect(() => {
+    if (!desktopAPI.isDesktop || !currentModel) return;
+
+    const handleFileChange = (event: any) => {
+      console.log('File changed detected in version control:', event);
+      
+      if (event.eventType === 'change' && event.filePath && event.filePath === currentModel) {
+        console.log('Model file changed on disk - marking as having unsaved changes');
+        console.log('Before setting hasUnsavedChanges:', hasUnsavedChanges);
+        setHasUnsavedChanges(true);
+        console.log('hasUnsavedChanges should now be true');
+      }
+    };
+
+    // Set up file change listener
+    desktopAPI.onFileChanged(handleFileChange);
+
+    // Cleanup
+    return () => {
+      desktopAPI.removeAllListeners('file-changed');
+    };
+  }, [currentModel]); // Re-setup when current model changes
+
+  const commitModelChanges = useCallback(async (message: string, currentModelData?: LoadedModel): Promise<void> => {
     if (!currentModel) {
       throw new Error("No model is currently open");
     }
 
     try {
-      // TODO: Implement actual model data capture and storage
       const newCommit: ModelCommit = {
         id: Date.now().toString(),
         message,
         timestamp: Date.now(),
-        // modelData: await captureCurrentModelState(), // TODO: Implement
+        modelData: currentModelData, // Store the current model state
       };
 
       setCommits(prev => [newCommit, ...prev]);
@@ -92,22 +140,29 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         return false;
       }
 
-      // TODO: Implement actual model restoration
-      // This would involve:
-      // 1. Loading the stored model data from the commit
-      // 2. Overwriting the current model file
-      // 3. Triggering a reload in the model viewer
+      if (!commit.modelData) {
+        console.error("No model data found for commit:", commitId);
+        return false;
+      }
+
+      // Restore the model by calling the callback provided by ModelContext
+      if (onModelRestore) {
+        onModelRestore(commit.modelData);
+        console.log("Model restored to commit:", commit);
+      } else {
+        console.error("Model restore callback not set");
+        return false;
+      }
 
       setCurrentCommitId(commitId);
       setHasUnsavedChanges(false);
 
-      console.log("Model restored to commit:", commit);
       return true;
     } catch (error) {
       console.error("Failed to restore to commit:", error);
       return false;
     }
-  }, [commits]);
+  }, [commits, onModelRestore]);
 
   const markUnsavedChanges = useCallback(() => {
     setHasUnsavedChanges(true);
@@ -133,10 +188,13 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     hasUnsavedChanges,
     setCurrentModel,
     commitModelChanges,
+    createInitialCommit,
     restoreToCommit,
     markUnsavedChanges,
     clearUnsavedChanges,
     clearCurrentModel,
+    onModelRestore,
+    setModelRestoreCallback,
   };
 
   return (

@@ -46,28 +46,28 @@ class DesktopAPIService {
 
   // Project Management
   async openProjectDialog(): Promise<string | null> {
-    if (!this.isElectron) return null;
+    if (!this.isElectron || !window.electronAPI) return null;
     return window.electronAPI.openProjectDialog();
   }
 
   async getCurrentProject(): Promise<ProjectInfo | null> {
-    if (!this.isElectron) return null;
+    if (!this.isElectron || !window.electronAPI) return null;
     return window.electronAPI.getCurrentProject();
   }
 
   async closeProject(): Promise<void> {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     return window.electronAPI.closeProject();
   }
 
   // Version Control
   async gitInit(projectPath: string): Promise<void> {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     return window.electronAPI.gitInit(projectPath);
   }
 
   async gitStatus(): Promise<GitStatus | null> {
-    if (!this.isElectron) return null;
+    if (!this.isElectron || !window.electronAPI) return null;
     try {
       return await window.electronAPI.gitStatus();
     } catch (error) {
@@ -77,22 +77,22 @@ class DesktopAPIService {
   }
 
   async gitCommit(message: string, files: string[]): Promise<void> {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     return window.electronAPI.gitCommit(message, files);
   }
 
   async gitPush(): Promise<void> {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     return window.electronAPI.gitPush();
   }
 
   async gitPull(): Promise<void> {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     return window.electronAPI.gitPull();
   }
 
   async gitLog(): Promise<GitCommit[]> {
-    if (!this.isElectron) return [];
+    if (!this.isElectron || !window.electronAPI) return [];
     try {
       return await window.electronAPI.gitLog();
     } catch (error) {
@@ -102,49 +102,59 @@ class DesktopAPIService {
   }
 
   async gitCheckout(commitHash: string): Promise<void> {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     return window.electronAPI.gitCheckout(commitHash);
   }
 
   // File Watching
   async startFileWatching(): Promise<void> {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     return window.electronAPI.startFileWatching();
   }
 
   async stopFileWatching(): Promise<void> {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     return window.electronAPI.stopFileWatching();
+  }
+
+  async setCurrentFile(filePath: string): Promise<void> {
+    if (!this.isElectron || !window.electronAPI) return;
+    return window.electronAPI.setCurrentFile(filePath);
+  }
+
+  async readFileBuffer(filePath: string): Promise<ArrayBuffer | null> {
+    if (!this.isElectron || !window.electronAPI) return null;
+    return window.electronAPI.readFileBuffer(filePath);
   }
 
   // Event Listeners
   onProjectOpened(callback: (project: ProjectInfo) => void): void {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     window.electronAPI.onProjectOpened(callback);
   }
 
   onProjectClosed(callback: () => void): void {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     window.electronAPI.onProjectClosed(callback);
   }
 
   onFileChanged(callback: (event: FileChangeEvent) => void): void {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     window.electronAPI.onFileChanged(callback);
   }
 
   onShowCommitDialog(callback: () => void): void {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     window.electronAPI.onShowCommitDialog(callback);
   }
 
   onGitOperationComplete(callback: (operation: string) => void): void {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     window.electronAPI.onGitOperationComplete(callback);
   }
 
   removeAllListeners(channel: string): void {
-    if (!this.isElectron) return;
+    if (!this.isElectron || !window.electronAPI) return;
     window.electronAPI.removeAllListeners(channel);
   }
 }

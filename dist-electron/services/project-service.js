@@ -33,18 +33,6 @@ export class ProjectService {
         return projectInfo;
     }
     /**
-     * Initialize a new Git repository for the current project
-     */
-    async initializeRepository(projectPath) {
-        if (!this.gitService && projectPath) {
-            this.gitService = new GitService(dirname(projectPath));
-        }
-        if (!this.gitService) {
-            throw new Error('No project is currently open');
-        }
-        await this.gitService.init();
-    }
-    /**
      * Create a backup of the .3dm file before any operations
      */
     createBackup(filePath) {

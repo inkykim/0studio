@@ -383,6 +383,9 @@ export const ModelViewer = () => {
 
   const [isDragOver, setIsDragOver] = useState(false);
 
+  // Safety check for stats - provide default values if undefined
+  const safeStats = stats || { curves: 0, surfaces: 0, polysurfaces: 0 };
+
   const handleSceneReady = useCallback((scene: THREE.Scene) => {
     setSceneRef(scene);
   }, [setSceneRef]);
@@ -548,9 +551,9 @@ export const ModelViewer = () => {
 
           {/* Viewport info overlay */}
           <div className="absolute bottom-4 left-4 z-20 text-code text-xs text-muted-foreground space-y-1">
-            <div>Curves: {stats.curves}</div>
-            <div>Surfaces: {stats.surfaces}</div>
-            <div>Polysurfaces: {stats.polysurfaces}</div>
+            <div>Curves: {safeStats.curves}</div>
+            <div>Surfaces: {safeStats.surfaces}</div>
+            <div>Polysurfaces: {safeStats.polysurfaces}</div>
           </div>
 
           {/* Controls hint */}

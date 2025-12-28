@@ -19,6 +19,8 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     // File watching
     startFileWatching: () => electron_1.ipcRenderer.invoke('start-file-watching'),
     stopFileWatching: () => electron_1.ipcRenderer.invoke('stop-file-watching'),
+    setCurrentFile: (filePath) => electron_1.ipcRenderer.invoke('set-current-file', filePath),
+    readFileBuffer: (filePath) => electron_1.ipcRenderer.invoke('read-file-buffer', filePath),
     // Event listeners
     onProjectOpened: (callback) => {
         electron_1.ipcRenderer.on('project-opened', (_, project) => callback(project));
