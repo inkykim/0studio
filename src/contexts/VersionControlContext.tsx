@@ -16,10 +16,12 @@ interface VersionControlContextType {
   commits: ModelCommit[];
   currentCommitId: string | null;
   hasUnsavedChanges: boolean;
+  isProcessingAICommit: boolean;
   
   // Actions
   setCurrentModel: (path: string) => void;
   commitModelChanges: (message: string, currentModelData?: LoadedModel) => Promise<void>;
+  commitWithAI: (message: string) => Promise<{ success: boolean; error?: string }>;
   createInitialCommit: (modelData: LoadedModel) => void;
   restoreToCommit: (commitId: string) => Promise<boolean>;
   markUnsavedChanges: () => void;
@@ -29,6 +31,10 @@ interface VersionControlContextType {
   // Model restoration callback - will be set by ModelContext
   onModelRestore?: (modelData: LoadedModel) => void;
   setModelRestoreCallback: (callback: (modelData: LoadedModel) => void) => void;
+  
+  // AI commit callbacks - will be set by a component that can execute commands
+  onAICommit?: (message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>;
+  setAICommitCallback: (callback: (message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>) => void;
 }
 
 const VersionControlContext = createContext<VersionControlContextType | undefined>(undefined);
@@ -43,10 +49,16 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [commits, setCommits] = useState<ModelCommit[]>([]);
   const [currentCommitId, setCurrentCommitId] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isProcessingAICommit, setIsProcessingAICommit] = useState(false);
   const [onModelRestore, setOnModelRestore] = useState<((modelData: LoadedModel) => void) | undefined>(undefined);
+  const [onAICommit, setOnAICommit] = useState<((message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>) | undefined>(undefined);
 
   const setModelRestoreCallback = useCallback((callback: (modelData: LoadedModel) => void) => {
     setOnModelRestore(() => callback);
+  }, []);
+
+  const setAICommitCallback = useCallback((callback: (message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>) => {
+    setOnAICommit(() => callback);
   }, []);
 
   const setCurrentModel = useCallback((path: string) => {
@@ -132,6 +144,49 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     }
   }, [currentModel]);
 
+  // Commit using AI to interpret the message and modify the model
+  const commitWithAI = useCallback(async (message: string): Promise<{ success: boolean; error?: string }> => {
+    if (!currentModel) {
+      return { success: false, error: "No model is currently open" };
+    }
+
+    if (!onAICommit) {
+      return { success: false, error: "AI commit handler not set up" };
+    }
+
+    setIsProcessingAICommit(true);
+
+    try {
+      // Call the AI commit handler which will interpret the message and execute commands
+      const result = await onAICommit(message);
+
+      if (!result.success) {
+        setIsProcessingAICommit(false);
+        return { success: false, error: result.error };
+      }
+
+      // Create the commit with the updated model data
+      const newCommit: ModelCommit = {
+        id: Date.now().toString(),
+        message: `🤖 ${message}`, // Prefix with robot emoji to indicate AI-generated changes
+        timestamp: Date.now(),
+        modelData: result.modelData,
+      };
+
+      setCommits(prev => [newCommit, ...prev]);
+      setCurrentCommitId(newCommit.id);
+      setHasUnsavedChanges(false);
+      setIsProcessingAICommit(false);
+
+      console.log("AI-driven commit created:", newCommit);
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to create AI commit:", error);
+      setIsProcessingAICommit(false);
+      return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    }
+  }, [currentModel, onAICommit]);
+
   const restoreToCommit = useCallback(async (commitId: string): Promise<boolean> => {
     try {
       const commit = commits.find(c => c.id === commitId);
@@ -186,8 +241,10 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     commits,
     currentCommitId,
     hasUnsavedChanges,
+    isProcessingAICommit,
     setCurrentModel,
     commitModelChanges,
+    commitWithAI,
     createInitialCommit,
     restoreToCommit,
     markUnsavedChanges,
@@ -195,6 +252,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     clearCurrentModel,
     onModelRestore,
     setModelRestoreCallback,
+    onAICommit,
+    setAICommitCallback,
   };
 
   return (

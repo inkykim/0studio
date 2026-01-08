@@ -1,5 +1,6 @@
 import { Circle } from "lucide-react";
 import { useModel } from "@/contexts/ModelContext";
+import { UserMenu } from "@/components/Auth";
 
 export const TitleBar = () => {
   const { currentFile, fileName } = useModel();
@@ -23,8 +24,10 @@ export const TitleBar = () => {
         )}
       </div>
 
-      {/* Right spacer for symmetry */}
-      <div className="w-20" />
+      {/* Right side - User menu */}
+      <div className="w-20 flex items-center justify-end" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+        <UserMenu />
+      </div>
     </div>
   );
 };

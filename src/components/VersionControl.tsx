@@ -1,11 +1,15 @@
-import { Archive, Clock, RotateCcw, Save, FolderOpen, X } from "lucide-react";
+import { Archive, Clock, RotateCcw, Save, FolderOpen, X, Sparkles, Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { useState, useEffect } from "react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { useState, useEffect, useCallback } from "react";
 import { useModel } from "@/contexts/ModelContext";
 import { useVersionControl } from "@/contexts/VersionControlContext";
+import { interpretCommitMessage, isGeminiConfigured } from "@/lib/gemini-service";
+import { parseGeminiResponse, executeCommands, SceneCommand } from "@/lib/scene-commands";
 
 const formatTimeAgo = (timestamp: number) => {
   const now = Date.now();
@@ -21,22 +25,39 @@ const formatTimeAgo = (timestamp: number) => {
 };
 
 export const VersionControl = () => {
-  const { currentFile, fileName, clearModel, triggerFileDialog, loadedModel } = useModel();
+  const { 
+    currentFile, 
+    fileName, 
+    clearModel, 
+    triggerFileDialog, 
+    loadedModel,
+    addPrimitive,
+    removeObject,
+    transformObject,
+    setObjectColor,
+    clearGeneratedObjects,
+    generatedObjects,
+  } = useModel();
   const { 
     currentModel, 
     modelName, 
     commits, 
     currentCommitId, 
-    hasUnsavedChanges, 
+    hasUnsavedChanges,
+    isProcessingAICommit,
     setCurrentModel,
     commitModelChanges,
+    commitWithAI,
     restoreToCommit,
     markUnsavedChanges,
-    clearCurrentModel
+    clearCurrentModel,
+    setAICommitCallback,
   } = useVersionControl();
   
   const [commitMessage, setCommitMessage] = useState("");
   const [isCommitting, setIsCommitting] = useState(false);
+  const [useAICommit, setUseAICommit] = useState(true); // Default to AI mode when no 3dm changes
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // When a model file is loaded, update the version control
   useEffect(() => {
@@ -44,6 +65,58 @@ export const VersionControl = () => {
       setCurrentModel(currentFile);
     }
   }, [currentFile, currentModel, setCurrentModel]);
+
+  // Set up the AI commit callback
+  const handleAICommit = useCallback(async (message: string): Promise<{ success: boolean; modelData?: typeof loadedModel; error?: string }> => {
+    // Interpret the commit message using LLM
+    const result = await interpretCommitMessage(message, {
+      generatedObjects: generatedObjects.map(obj => ({
+        id: obj.id,
+        type: obj.type,
+        name: obj.name,
+      })),
+    });
+
+    if (!result.success || result.commands.length === 0) {
+      return { 
+        success: false, 
+        error: result.error || "Could not interpret commit message as modeling instructions" 
+      };
+    }
+
+    // Execute the commands
+    const getLastObjectId = () => {
+      return generatedObjects.length > 0 ? generatedObjects[generatedObjects.length - 1].id : null;
+    };
+
+    const executionResult = executeCommands(result.commands, {
+      addPrimitive,
+      removeObject,
+      transformObject,
+      setObjectColor,
+      clearGeneratedObjects,
+      getLastObjectId,
+    });
+
+    if (!executionResult.success) {
+      return {
+        success: false,
+        error: `Some commands failed: ${executionResult.errors.join(", ")}`,
+      };
+    }
+
+    // Return success with the current model data
+    // Note: The model data will be captured after commands execute
+    return {
+      success: true,
+      modelData: loadedModel || undefined,
+    };
+  }, [generatedObjects, addPrimitive, removeObject, transformObject, setObjectColor, clearGeneratedObjects, loadedModel]);
+
+  // Register the AI commit callback
+  useEffect(() => {
+    setAICommitCallback(handleAICommit);
+  }, [handleAICommit, setAICommitCallback]);
 
   const handleRestoreCommit = async (commitId: string) => {
     try {
@@ -57,18 +130,36 @@ export const VersionControl = () => {
   };
 
   const handleCommit = async () => {
-    if (!commitMessage.trim() || isCommitting || !hasUnsavedChanges || !loadedModel) return;
+    if (!commitMessage.trim() || isCommitting) return;
     
     setIsCommitting(true);
+    setAiError(null);
+    
     try {
-      await commitModelChanges(commitMessage.trim(), loadedModel);
-      setCommitMessage("");
+      // If we have unsaved 3dm changes, use traditional commit
+      if (hasUnsavedChanges && loadedModel) {
+        await commitModelChanges(commitMessage.trim(), loadedModel);
+        setCommitMessage("");
+      } 
+      // Otherwise, if AI mode is enabled, use AI to interpret the message
+      else if (useAICommit && isGeminiConfigured()) {
+        const result = await commitWithAI(commitMessage.trim());
+        if (result.success) {
+          setCommitMessage("");
+        } else {
+          setAiError(result.error || "Failed to process AI commit");
+        }
+      }
     } catch (error) {
-      console.error("Failed to commit model:", error);
+      console.error("Failed to commit:", error);
+      setAiError(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setIsCommitting(false);
     }
   };
+
+  // Check if we can make an AI commit (when there are no 3dm changes)
+  const canMakeAICommit = !hasUnsavedChanges && useAICommit && isGeminiConfigured() && currentFile;
 
   const handleCloseModel = () => {
     clearModel();
@@ -165,25 +256,94 @@ export const VersionControl = () => {
             </section>
           )}
 
-          {/* Current Status */}
-          {!hasUnsavedChanges && (
+          {/* AI Commit Mode - when no external 3dm changes */}
+          {!hasUnsavedChanges && currentFile && (
             <section>
-              <div className="text-center py-6">
-                <Clock className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">
-                  No unsaved changes
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Make changes to your model file to create a new version
-                </p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => markUnsavedChanges()} 
-                  className="mt-3"
-                >
-                  Simulate Changes
-                </Button>
+              <div className="space-y-4">
+                {/* AI Mode Toggle */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 border border-violet-500/20">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-violet-400" />
+                    <Label htmlFor="ai-mode" className="text-sm font-medium cursor-pointer">
+                      AI Modeling Mode
+                    </Label>
+                  </div>
+                  <Switch
+                    id="ai-mode"
+                    checked={useAICommit}
+                    onCheckedChange={setUseAICommit}
+                    disabled={!isGeminiConfigured()}
+                  />
+                </div>
+
+                {useAICommit && isGeminiConfigured() ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Describe changes in natural language — the AI will modify the 3D model accordingly.
+                    </p>
+                    <Input
+                      placeholder="e.g., Add a red sphere next to the box..."
+                      value={commitMessage}
+                      onChange={(e) => {
+                        setCommitMessage(e.target.value);
+                        setAiError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && commitMessage.trim() && !isCommitting && !isProcessingAICommit) {
+                          handleCommit();
+                        }
+                      }}
+                      className="bg-background/50"
+                    />
+                    {aiError && (
+                      <p className="text-xs text-destructive">{aiError}</p>
+                    )}
+                    <Button 
+                      onClick={handleCommit} 
+                      disabled={!commitMessage.trim() || isCommitting || isProcessingAICommit}
+                      className="w-full gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700"
+                    >
+                      {isCommitting || isProcessingAICommit ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Processing with AI...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          Apply Changes with AI
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                ) : !isGeminiConfigured() ? (
+                  <div className="text-center py-4">
+                    <p className="text-xs text-muted-foreground">
+                      Configure VITE_GEMINI_API_KEY to enable AI modeling
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <Clock className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">
+                      No unsaved changes
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Enable AI Mode above to create changes with natural language
+                    </p>
+                  </div>
+                )}
+
+                <div className="border-t border-border/50 pt-3">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => markUnsavedChanges()} 
+                    className="w-full text-xs text-muted-foreground"
+                  >
+                    Or simulate external file changes
+                  </Button>
+                </div>
               </div>
             </section>
           )}
