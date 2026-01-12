@@ -42,6 +42,40 @@ npm run build:electron
 npm run electron:dev
 ```
 
+### Backend Setup (Cloud Storage)
+
+To enable cloud storage with AWS S3:
+
+1. **Set up AWS S3** (see [AWS_SETUP.md](./AWS_SETUP.md) for detailed instructions):
+   - Create S3 bucket with versioning enabled
+   - Create IAM user with S3 permissions
+   - Get AWS credentials
+
+2. **Configure backend**:
+   ```bash
+   cd backend
+   cp .env.example .env
+   # Edit .env with your AWS and Supabase credentials
+   npm install
+   ```
+
+3. **Test backend setup**:
+   ```bash
+   node test-setup.js
+   ```
+
+4. **Start backend server**:
+   ```bash
+   npm run dev
+   ```
+
+5. **Update frontend `.env`**:
+   ```env
+   VITE_AWS_API_URL=http://localhost:3000/api/aws
+   ```
+
+See [AWS_SETUP.md](./AWS_SETUP.md) and [backend/README.md](./backend/README.md) for complete setup instructions.
+
 ### Building for Distribution
 
 1. Build the React app:

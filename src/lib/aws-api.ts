@@ -1,5 +1,5 @@
-// AWS S3 API service (dummy implementation for now)
-// This will be replaced with actual AWS SDK integration later
+// AWS S3 API service
+// Connects to backend API that handles AWS operations securely
 
 export interface PresignedUrlResponse {
   url: string;
@@ -33,16 +33,28 @@ export class AWSS3API {
    * @param expiresIn - Expiration time in seconds (default: 3600 = 1 hour)
    */
   async getPresignedUploadUrl(s3Key: string, expiresIn: number = 3600): Promise<PresignedUrlResponse> {
-    // TODO: Replace with actual API call to your backend
-    // Backend should call AWS S3 getPresignedUrl with PUT operation
+    const { supabase } = await import('@/lib/supabase');
+    const { data: { session } } = await supabase.auth.getSession();
     
-    console.log('[DUMMY] Getting presigned upload URL for:', s3Key);
+    if (!session) {
+      throw new Error('User must be authenticated to upload files');
+    }
+
+    const response = await fetch(
+      `${this.baseUrl}/presigned-upload?key=${encodeURIComponent(s3Key)}&expires=${expiresIn}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      }
+    );
     
-    // Dummy response - replace with actual API call
-    return {
-      url: `${this.baseUrl}/upload?key=${encodeURIComponent(s3Key)}&expires=${expiresIn}`,
-      expiresIn,
-    };
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Failed to get presigned upload URL: ${response.statusText}`);
+    }
+    
+    return await response.json();
   }
 
   /**
@@ -56,16 +68,28 @@ export class AWSS3API {
     versionId: string,
     expiresIn: number = 3600
   ): Promise<PresignedUrlResponse> {
-    // TODO: Replace with actual API call to your backend
-    // Backend should call AWS S3 getPresignedUrl with GET operation and VersionId parameter
+    const { supabase } = await import('@/lib/supabase');
+    const { data: { session } } = await supabase.auth.getSession();
     
-    console.log('[DUMMY] Getting presigned download URL for:', s3Key, 'version:', versionId);
+    if (!session) {
+      throw new Error('User must be authenticated to download files');
+    }
+
+    const response = await fetch(
+      `${this.baseUrl}/presigned-download?key=${encodeURIComponent(s3Key)}&versionId=${versionId}&expires=${expiresIn}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      }
+    );
     
-    // Dummy response - replace with actual API call
-    return {
-      url: `${this.baseUrl}/download?key=${encodeURIComponent(s3Key)}&versionId=${versionId}&expires=${expiresIn}`,
-      expiresIn,
-    };
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Failed to get presigned download URL: ${response.statusText}`);
+    }
+    
+    return await response.json();
   }
 
   /**
@@ -80,16 +104,7 @@ export class AWSS3API {
     fileData: ArrayBuffer | Blob | File,
     contentType?: string
   ): Promise<UploadResponse> {
-    // TODO: Replace with actual upload
-    // The actual implementation will:
-    // 1. PUT the file to the presigned URL
-    // 2. Extract x-amz-version-id from response headers
-    // 3. Return the version ID
-    
-    console.log('[DUMMY] Uploading file to:', presignedUrl);
-    
     try {
-      // Dummy implementation - replace with actual fetch
       const response = await fetch(presignedUrl, {
         method: 'PUT',
         body: fileData,
@@ -100,9 +115,13 @@ export class AWSS3API {
         throw new Error(`Upload failed: ${response.statusText}`);
       }
 
-      // Extract version ID from response header
-      const versionId = response.headers.get('x-amz-version-id') || 'dummy-version-id';
+      // Extract version ID from response header (S3 returns this when versioning is enabled)
+      const versionId = response.headers.get('x-amz-version-id');
       const etag = response.headers.get('etag') || '';
+
+      if (!versionId) {
+        throw new Error('S3 version ID not found in response. Make sure versioning is enabled on your S3 bucket.');
+      }
 
       return {
         versionId,
@@ -119,9 +138,6 @@ export class AWSS3API {
    * @param presignedUrl - The presigned URL from getPresignedDownloadUrl
    */
   async downloadFile(presignedUrl: string): Promise<ArrayBuffer> {
-    // TODO: Replace with actual download
-    console.log('[DUMMY] Downloading file from:', presignedUrl);
-    
     try {
       const response = await fetch(presignedUrl);
       
@@ -141,13 +157,29 @@ export class AWSS3API {
    * @param s3Key - The S3 key (path) of the file
    */
   async listFileVersions(s3Key: string): Promise<S3FileMetadata[]> {
-    // TODO: Replace with actual API call to your backend
-    // Backend should call AWS S3 listObjectVersions
+    const { supabase } = await import('@/lib/supabase');
+    const { data: { session } } = await supabase.auth.getSession();
     
-    console.log('[DUMMY] Listing versions for:', s3Key);
+    if (!session) {
+      throw new Error('User must be authenticated to list file versions');
+    }
+
+    const response = await fetch(
+      `${this.baseUrl}/list-versions?key=${encodeURIComponent(s3Key)}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      }
+    );
     
-    // Dummy response - replace with actual API call
-    return [];
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Failed to list versions: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    return data.versions;
   }
 
   /**
@@ -156,10 +188,26 @@ export class AWSS3API {
    * @param versionId - The S3 version ID to delete
    */
   async deleteFileVersion(s3Key: string, versionId: string): Promise<void> {
-    // TODO: Replace with actual API call to your backend
-    // Backend should call AWS S3 deleteObject with VersionId parameter
+    const { supabase } = await import('@/lib/supabase');
+    const { data: { session } } = await supabase.auth.getSession();
     
-    console.log('[DUMMY] Deleting version:', versionId, 'of file:', s3Key);
+    if (!session) {
+      throw new Error('User must be authenticated to delete file versions');
+    }
+
+    const response = await fetch(`${this.baseUrl}/delete-version`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ key: s3Key, versionId }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Failed to delete version: ${response.statusText}`);
+    }
   }
 
   /**

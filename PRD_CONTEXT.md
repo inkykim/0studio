@@ -1,6 +1,6 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2024-1-11
+**Last Updated:** 2024-12-20
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -183,7 +183,7 @@
 │   │   ├── ModelViewer.tsx      # 3D model viewer component
 │   │   ├── VersionControl.tsx   # Version control UI
 │   │   ├── CopilotChat.tsx     # AI chat interface (commented out)
-│   │   ├── TitleBar.tsx        # macOS title bar
+│   │   ├── TitleBar.tsx        # macOS title bar with user menu dropdown
 │   │   └── ui/                 # Shadcn UI components
 │   │
 │   ├── contexts/        # React contexts (state management)
@@ -315,7 +315,9 @@
 - Dashboard UI for selecting payment plans
 - Displays Student and Enterprise plan options
 - Shows current plan status and feature limitations
-- Accessible via dashboard route and TitleBar link
+- Accessible via `/dashboard` route
+- Requires both `VersionControlProvider` and `ModelProvider` (ModelProvider uses useVersionControl internally)
+- Wrapped with providers to support TitleBar component
 
 **`src/hooks/use-cloud-pull.ts`**
 - Hook for cloud pull operations with payment plan validation
@@ -347,9 +349,13 @@
 - Authentication UI components
 - `AuthDialog`: Login/Signup dialog with tabs
 - `ResetPasswordDialog`: Password reset flow
-- `UserMenu`: User info and sign out button
+- `UserMenu`: Dropdown menu triggered by clicking user email
+  - Shows user email as clickable trigger button
+  - Dropdown contains: Dashboard option (with icon) and Sign Out option (with icon)
+  - Uses Shadcn DropdownMenu component
+  - If user not logged in, shows AuthDialog instead
 - Uses Shadcn Forms for validation
-- Integrates with AuthContext
+- Integrates with AuthContext and React Router for navigation
 
 ---
 
@@ -764,7 +770,12 @@ interface Branch {
 
 - **Provider**: Supabase Auth
 - **Context**: AuthContext manages user session state
-- **Components**: AuthDialog, UserMenu in TitleBar
+- **Components**: 
+  - `AuthDialog`: Login/Signup dialog with tabs
+  - `UserMenu`: Dropdown menu accessible by clicking user email in TitleBar
+    - Shows user email as clickable button
+    - Dropdown menu contains Dashboard and Sign Out options
+    - Uses DropdownMenu component from Shadcn UI
 - **Session**: Auto-refreshes tokens, persists across app restarts
 - **Password Reset**: Email-based reset flow
 
@@ -774,6 +785,8 @@ interface Branch {
 - **Storage**: Payment plan stored in localStorage per user ID
 - **Access Control**: Without a verified payment plan, users can make commits but cannot pull from cloud storage
 - **Dashboard**: Users can select their plan via the Dashboard page (`/dashboard`)
+  - Accessible by clicking user email in TitleBar → Dashboard option
+  - Dashboard page requires both `VersionControlProvider` and `ModelProvider` wrappers
 - **Verification**: `hasVerifiedPlan` property in AuthContext indicates if user has an active plan
 - **Restrictions**: 
   - Commits: Always allowed (local operations)
@@ -936,6 +949,11 @@ npm run electron:dist
 8. **UI components**: Prefer Shadcn UI from `src/components/ui/`
 9. **Forms**: Use Shadcn Forms pattern
 10. **State management**: Use contexts for global state, useState for local
+11. **Provider dependencies**: 
+    - `ModelProvider` requires `VersionControlProvider` (ModelProvider uses useVersionControl internally)
+    - Always wrap pages with both providers if using ModelProvider
+    - Dashboard page requires both providers for TitleBar to work correctly
+12. **UserMenu**: Clicking user email in TitleBar opens dropdown menu with Dashboard and Sign Out options
 
 ### Common Patterns
 
