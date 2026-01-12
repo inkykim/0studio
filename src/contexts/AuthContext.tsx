@@ -4,14 +4,19 @@ import { supabase } from '@/lib/supabase';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { toast } from 'sonner';
 
+export type PaymentPlan = 'student' | 'enterprise' | null;
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  paymentPlan: PaymentPlan;
+  hasVerifiedPlan: boolean;
   signUp: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
+  setPaymentPlan: (plan: PaymentPlan) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,6 +29,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [paymentPlan, setPaymentPlanState] = useState<PaymentPlan>(null);
+
+  // Load payment plan from localStorage
+  useEffect(() => {
+    const loadPaymentPlan = () => {
+      if (user) {
+        const stored = localStorage.getItem(`paymentPlan_${user.id}`);
+        setPaymentPlanState((stored as PaymentPlan) || null);
+      } else {
+        setPaymentPlanState(null);
+      }
+    };
+
+    loadPaymentPlan();
+  }, [user]);
 
   useEffect(() => {
     // Get initial session
@@ -128,14 +148,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const setPaymentPlan = async (plan: PaymentPlan) => {
+    if (user) {
+      // Store payment plan in localStorage (in a real app, this would be stored in Supabase)
+      localStorage.setItem(`paymentPlan_${user.id}`, plan || '');
+      setPaymentPlanState(plan);
+      toast.success(`Payment plan set to ${plan === 'student' ? 'Student' : 'Enterprise'}`);
+    }
+  };
+
+  const hasVerifiedPlan = paymentPlan !== null;
+
   const value: AuthContextType = {
     user,
     session,
     loading,
+    paymentPlan,
+    hasVerifiedPlan,
     signUp,
     signIn,
     signOut,
     resetPassword,
+    setPaymentPlan,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

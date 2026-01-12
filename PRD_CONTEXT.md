@@ -1,6 +1,6 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2024  
+**Last Updated:** 2024-1-11
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -33,6 +33,7 @@
 - **3D Model Viewer**: Interactive Three.js-based viewer for .3dm files
 - **Scene Manipulation**: Create, transform, and modify 3D primitives programmatically
 - **macOS Native**: Built specifically for macOS with proper file associations
+- **Payment Plans**: Student and Enterprise plans that unlock cloud storage features
 
 ### Project Structure
 
@@ -304,9 +305,23 @@
 
 **`src/contexts/AuthContext.tsx`**
 - Authentication state management using Supabase Auth
-- Provides: signUp, signIn, signOut, resetPassword
+- Provides: signUp, signIn, signOut, resetPassword, setPaymentPlan
 - Tracks user session and loading state
+- Manages payment plan state (student/enterprise/none)
 - Auto-refreshes tokens and persists sessions
+- Payment plan stored in localStorage per user
+
+**`src/pages/Dashboard.tsx`**
+- Dashboard UI for selecting payment plans
+- Displays Student and Enterprise plan options
+- Shows current plan status and feature limitations
+- Accessible via dashboard route and TitleBar link
+
+**`src/hooks/use-cloud-pull.ts`**
+- Hook for cloud pull operations with payment plan validation
+- Checks if user has verified payment plan before allowing pulls
+- Shows error toast with dashboard link if plan is missing
+- Wraps desktopAPI.gitPull() with permission checks
 
 **`src/lib/scene-commands.ts`**
 - Defines command types: create, transform, color, delete, clear
@@ -753,6 +768,19 @@ interface Branch {
 - **Session**: Auto-refreshes tokens, persists across app restarts
 - **Password Reset**: Email-based reset flow
 
+### Payment Plans
+
+- **Plans**: Student and Enterprise plans available
+- **Storage**: Payment plan stored in localStorage per user ID
+- **Access Control**: Without a verified payment plan, users can make commits but cannot pull from cloud storage
+- **Dashboard**: Users can select their plan via the Dashboard page (`/dashboard`)
+- **Verification**: `hasVerifiedPlan` property in AuthContext indicates if user has an active plan
+- **Restrictions**: 
+  - Commits: Always allowed (local operations)
+  - Pull from cloud storage: Requires verified payment plan
+  - Other features: All unlocked with verified plan
+- **Hook**: `useCloudPull()` hook provides validated pull operations with error handling
+
 ### Cloud Storage (Supabase + AWS S3)
 
 - **Database**: Supabase PostgreSQL (projects, commits, branches tables)
@@ -904,9 +932,10 @@ npm run electron:dist
 4. **AI integration**: Use gemini-service.ts, follow command format
 5. **Cloud operations**: Use supabase-api.ts for database, aws-api.ts for file storage
 6. **Authentication**: Use AuthContext and check user state before cloud operations
-7. **UI components**: Prefer Shadcn UI from `src/components/ui/`
-8. **Forms**: Use Shadcn Forms pattern
-9. **State management**: Use contexts for global state, useState for local
+7. **Payment plans**: Check `hasVerifiedPlan` before allowing pull operations, use `useCloudPull()` hook
+8. **UI components**: Prefer Shadcn UI from `src/components/ui/`
+9. **Forms**: Use Shadcn Forms pattern
+10. **State management**: Use contexts for global state, useState for local
 
 ### Common Patterns
 

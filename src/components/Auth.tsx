@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,7 +24,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { LayoutDashboard, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Login form schema
@@ -353,6 +363,7 @@ export function ResetPasswordDialog() {
 export function UserMenu() {
   const { user, signOut } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleSignOut = async () => {
     setIsLoading(true);
@@ -370,19 +381,29 @@ export function UserMenu() {
   }
 
   return (
-    <div className="flex items-center gap-4">
-      <div className="text-sm text-muted-foreground">
-        {user.email}
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleSignOut}
-        disabled={isLoading}
-      >
-        {isLoading ? 'Signing out...' : 'Sign Out'}
-      </Button>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        >
+          {user.email}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel>Account</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => navigate('/dashboard')}>
+          <LayoutDashboard className="mr-2 h-4 w-4" />
+          Dashboard
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={handleSignOut} disabled={isLoading}>
+          <LogOut className="mr-2 h-4 w-4" />
+          {isLoading ? 'Signing out...' : 'Sign Out'}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

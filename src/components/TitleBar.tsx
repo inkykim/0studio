@@ -1,4 +1,3 @@
-import { Circle } from "lucide-react";
 import { useModel } from "@/contexts/ModelContext";
 import { UserMenu } from "@/components/Auth";
 
