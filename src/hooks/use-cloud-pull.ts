@@ -1,5 +1,5 @@
 import { useAuth } from "@/contexts/AuthContext";
-import { desktopAPI } from "@/lib/desktop-api";
+import { useVersionControl } from "@/contexts/VersionControlContext";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
  */
 export function useCloudPull() {
   const { hasVerifiedPlan, user } = useAuth();
+  const { pullFromCloud, isCloudEnabled } = useVersionControl();
   const navigate = useNavigate();
 
   const checkPullPermission = (): boolean => {
@@ -27,28 +28,27 @@ export function useCloudPull() {
     return true;
   };
 
-  const gitPull = async (): Promise<void> => {
+  const pull = async (): Promise<void> => {
     if (!checkPullPermission()) {
       throw new Error("Pull operation requires a verified payment plan");
     }
 
-    if (!desktopAPI.isDesktop) {
-      throw new Error("Pull operations are only available in desktop mode");
+    if (!isCloudEnabled) {
+      throw new Error("Cloud sync is not enabled. Please open a model file first.");
     }
 
     try {
-      await desktopAPI.gitPull();
-      toast.success("Successfully pulled changes from cloud storage");
+      await pullFromCloud();
     } catch (error) {
-      console.error("Failed to pull changes:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to pull changes");
+      console.error("Failed to pull from cloud:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to pull from cloud storage");
       throw error;
     }
   };
 
   return {
-    gitPull,
+    pull,
     checkPullPermission,
-    canPull: hasVerifiedPlan && !!user,
+    canPull: hasVerifiedPlan && !!user && isCloudEnabled,
   };
 }

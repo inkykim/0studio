@@ -22,9 +22,9 @@ export class AWSS3API {
   private baseUrl: string;
 
   constructor() {
-    // This will be your backend API URL that handles AWS operations
-    // For now, using a placeholder
-    this.baseUrl = import.meta.env.VITE_AWS_API_URL || 'http://localhost:3000/api/aws';
+    // Use VITE_BACKEND_URL for consistency, fallback to VITE_AWS_API_URL for backward compatibility
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_AWS_API_URL || 'http://localhost:3000';
+    this.baseUrl = `${backendUrl}/api/aws`;
   }
 
   /**
