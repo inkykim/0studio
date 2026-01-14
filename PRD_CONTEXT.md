@@ -781,28 +781,63 @@ interface Branch {
 
 ### Payment Plans
 
-- **Plans**: Student and Enterprise plans available
-- **Storage**: Payment plan stored in localStorage per user ID
+- **Plans**: Student ($10/month) and Enterprise plans available
+- **Payment Provider**: Stripe subscriptions
+- **Storage**: Payment plan stored in Supabase `subscriptions` table (migrated from localStorage)
+- **Backend API**: Node.js/Express server handles Stripe integration
+  - **Local Development**: `http://localhost:3000`
+  - **Production**: Deploy to AWS Elastic Beanstalk, Lambda, or VPS (URL TBD)
+  - **Stripe Webhook Endpoint**: `/api/stripe/webhook`
+    - Local: `http://localhost:3000/api/stripe/webhook` (use Stripe CLI for testing)
+    - Production: `https://your-backend-domain.com/api/stripe/webhook`
 - **Access Control**: Without a verified payment plan, users can make commits but cannot pull from cloud storage
 - **Dashboard**: Users can select their plan via the Dashboard page (`/dashboard`)
   - Accessible by clicking user email in TitleBar → Dashboard option
   - Dashboard page requires both `VersionControlProvider` and `ModelProvider` wrappers
+  - Integrates with Stripe Checkout for subscription creation
 - **Verification**: `hasVerifiedPlan` property in AuthContext indicates if user has an active plan
+- **Webhook Events**: Listens to `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
 - **Restrictions**: 
   - Commits: Always allowed (local operations)
   - Pull from cloud storage: Requires verified payment plan
   - Other features: All unlocked with verified plan
 - **Hook**: `useCloudPull()` hook provides validated pull operations with error handling
 
+### Backend API Server
+
+- **Technology**: Node.js/Express server (`backend/server.js`)
+- **Port**: 3000 (configurable via `PORT` env variable)
+- **Base URL**:
+  - **Local Development**: `http://localhost:3000`
+  - **Production**: Deploy to AWS Elastic Beanstalk, Lambda, or VPS (URL TBD)
+- **Authentication**: All endpoints (except `/health`) require Supabase JWT token in `Authorization: Bearer <token>` header
+- **Security**: 
+  - JWT token verification via Supabase
+  - User isolation (users can only access their own resources)
+  - Rate limiting (100 requests per 15 minutes per IP)
+  - CORS protection
+- **Endpoints**:
+  - `GET /health` - Health check (no auth required)
+  - `GET /api/aws/presigned-upload` - Get presigned URL for S3 upload
+  - `GET /api/aws/presigned-download` - Get presigned URL for S3 download
+  - `GET /api/aws/list-versions` - List S3 file versions
+  - `DELETE /api/aws/delete-version` - Delete S3 file version
+  - `POST /api/stripe/create-checkout-session` - Create Stripe checkout session
+  - `POST /api/stripe/webhook` - Stripe webhook handler (raw body, signature verification)
+  - `GET /api/stripe/payment-status` - Get user's payment/subscription status
+- **Environment Variables**: See `backend/README.md` for full list
+- **Deployment**: See `AWS_SETUP.md` and `BACKEND_SETUP_COMPLETE.md` for deployment options
+
 ### Cloud Storage (Supabase + AWS S3)
 
 - **Database**: Supabase PostgreSQL (projects, commits, branches tables)
 - **File Storage**: AWS S3 with versioning enabled
+- **Backend API**: All S3 operations go through backend API server (not direct from frontend)
 - **S3 Structure**: `org-{userId}/project-{projectId}/models/{filename}`
 - **Version Tracking**: Each commit stores `s3_version_id` pointing to S3 version
 - **Delta Commits**: Only changed files get new S3 versions
 - **Presigned URLs**: Used for secure upload/download without exposing AWS credentials
-- **Current Status**: AWS API is dummy implementation, needs backend integration
+- **Current Status**: Backend API fully integrated, frontend uses `VITE_BACKEND_URL` or `VITE_AWS_API_URL`
 
 ### AI Integration
 

@@ -1,18 +1,117 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, GraduationCap, Building2, ArrowLeft } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { CheckCircle2, GraduationCap, Building2, ArrowLeft, Loader2 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { TitleBar } from "@/components/TitleBar";
 import { ModelProvider } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
+import { useState, useEffect } from "react";
+import { toast } from "sonner";
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
 export default function Dashboard() {
-  const { user, paymentPlan, setPaymentPlan, hasVerifiedPlan } = useAuth();
+  const { user, paymentPlan, hasVerifiedPlan, refreshPaymentStatus } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [loading, setLoading] = useState<string | null>(null);
 
-  const handleSelectPlan = async (plan: 'student' | 'enterprise') => {
-    await setPaymentPlan(plan);
+  // Handle success/cancel from Stripe redirect
+  useEffect(() => {
+    const success = searchParams.get('success');
+    const canceled = searchParams.get('canceled');
+    
+    if (success) {
+      toast.success('Payment successful! Your plan is now active.');
+      refreshPaymentStatus?.();
+      // Clean up URL
+      navigate('/dashboard', { replace: true });
+    } else if (canceled) {
+      toast.info('Payment canceled. You can try again anytime.');
+      navigate('/dashboard', { replace: true });
+    }
+  }, [searchParams, navigate, refreshPaymentStatus]);
+
+  const handleCheckout = async (lookupKey: string | null, planName: string, priceId?: string) => {
+    if (!user) {
+      toast.error('Please sign in to continue');
+      return;
+    }
+
+    const loadingKey = lookupKey || priceId || 'checkout';
+    setLoading(loadingKey);
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      
+      // Get current session
+      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.error('Session error:', sessionError);
+        throw new Error('Failed to get session');
+      }
+      
+      // If no session or expired, try to refresh
+      if (!session) {
+        throw new Error('Not authenticated. Please sign in again.');
+      }
+      
+      // Check if token is expired (basic check)
+      if (session.expires_at && session.expires_at < Date.now() / 1000) {
+        console.log('Token expired, refreshing...');
+        const { data: { session: newSession }, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError || !newSession) {
+          throw new Error('Session expired. Please sign in again.');
+        }
+        session = newSession;
+      }
+      
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in again.');
+      }
+      
+      console.log('Making request to:', `${BACKEND_URL}/api/stripe/create-checkout-session`);
+      
+      const requestBody: { lookup_key?: string; price_id?: string } = {};
+      if (lookupKey) {
+        requestBody.lookup_key = lookupKey;
+      } else if (priceId) {
+        requestBody.price_id = priceId;
+      }
+      
+      const response = await fetch(`${BACKEND_URL}/api/stripe/create-checkout-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        const errorMessage = error.error || 'Failed to create checkout session';
+        if (error.hint) {
+          console.error('Stripe error:', error);
+          throw new Error(`${errorMessage}. ${error.hint}`);
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      
+      // Redirect to Stripe Checkout
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No checkout URL received');
+      }
+    } catch (error) {
+      console.error('Checkout error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to start checkout');
+      setLoading(null);
+    }
   };
 
   return (
@@ -85,9 +184,19 @@ export default function Dashboard() {
                   <Button
                     className="w-full"
                     variant={paymentPlan === 'student' ? 'default' : 'outline'}
-                    onClick={() => handleSelectPlan('student')}
+                    onClick={() => handleCheckout(null, 'student', 'price_1SpIuQBU9neqC79tYoTbDCck')}
+                    disabled={loading !== null || paymentPlan === 'student'}
                   >
-                    {paymentPlan === 'student' ? 'Selected' : 'Select Student Plan'}
+                    {loading === 'price_1SpIuQBU9neqC79tYoTbDCck' || loading === 'checkout' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : paymentPlan === 'student' ? (
+                      'Active'
+                    ) : (
+                      'Subscribe - $10/month'
+                    )}
                   </Button>
                 </CardFooter>
               </Card>
@@ -129,9 +238,19 @@ export default function Dashboard() {
                   <Button
                     className="w-full"
                     variant={paymentPlan === 'enterprise' ? 'default' : 'outline'}
-                    onClick={() => handleSelectPlan('enterprise')}
+                    onClick={() => handleCheckout('0studio_Fricionless_-_Enterprise-XXXXX', 'enterprise')}
+                    disabled={loading !== null || paymentPlan === 'enterprise'}
                   >
-                    {paymentPlan === 'enterprise' ? 'Selected' : 'Select Enterprise Plan'}
+                    {loading === '0studio_Fricionless_-_Enterprise-XXXXX' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : paymentPlan === 'enterprise' ? (
+                      'Active'
+                    ) : (
+                      'Contact Sales'
+                    )}
                   </Button>
                 </CardFooter>
               </Card>

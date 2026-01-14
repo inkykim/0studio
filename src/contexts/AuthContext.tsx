@@ -1,5 +1,5 @@
 // Authentication context using Supabase
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { toast } from 'sonner';
@@ -17,6 +17,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
   setPaymentPlan: (plan: PaymentPlan) => Promise<void>;
+  refreshPaymentStatus: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,19 +32,46 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [paymentPlan, setPaymentPlanState] = useState<PaymentPlan>(null);
 
-  // Load payment plan from localStorage
-  useEffect(() => {
-    const loadPaymentPlan = () => {
-      if (user) {
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+
+  // Load payment plan from backend API (Supabase)
+  const loadPaymentPlan = useCallback(async () => {
+    if (!user || !session?.access_token) {
+      setPaymentPlanState(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/stripe/payment-status`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.hasActivePlan && data.plan) {
+          setPaymentPlanState(data.plan as PaymentPlan);
+        } else {
+          setPaymentPlanState(null);
+        }
+      } else {
+        // If API fails, fall back to localStorage for backward compatibility
         const stored = localStorage.getItem(`paymentPlan_${user.id}`);
         setPaymentPlanState((stored as PaymentPlan) || null);
-      } else {
-        setPaymentPlanState(null);
       }
-    };
+    } catch (error) {
+      console.error('Error loading payment plan:', error);
+      // Fall back to localStorage
+      const stored = localStorage.getItem(`paymentPlan_${user.id}`);
+      setPaymentPlanState((stored as PaymentPlan) || null);
+    }
+  }, [user, session, BACKEND_URL]);
 
+  // Load payment plan when user changes
+  useEffect(() => {
     loadPaymentPlan();
-  }, [user]);
+  }, [loadPaymentPlan]);
 
   useEffect(() => {
     // Get initial session
@@ -150,12 +178,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const setPaymentPlan = async (plan: PaymentPlan) => {
     if (user) {
-      // Store payment plan in localStorage (in a real app, this would be stored in Supabase)
+      // This is now handled by Stripe webhooks, but keep for backward compatibility
       localStorage.setItem(`paymentPlan_${user.id}`, plan || '');
       setPaymentPlanState(plan);
-      toast.success(`Payment plan set to ${plan === 'student' ? 'Student' : 'Enterprise'}`);
     }
   };
+
+  const refreshPaymentStatus = useCallback(async () => {
+    await loadPaymentPlan();
+  }, [loadPaymentPlan]);
 
   const hasVerifiedPlan = paymentPlan !== null;
 
@@ -170,6 +201,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     signOut,
     resetPassword,
     setPaymentPlan,
+    refreshPaymentStatus,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
