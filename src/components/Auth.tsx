@@ -169,7 +169,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
             {form.formState.errors.root.message}
           </div>
         )}
-        <Button type="submit" className="w-full" disabled={isLoading}>
+        <Button type="submit" size="sm" className="w-auto mx-auto px-8" disabled={isLoading}>
           {isLoading ? 'Signing in...' : 'Sign In'}
         </Button>
       </form>
