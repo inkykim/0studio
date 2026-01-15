@@ -200,6 +200,7 @@ class RhinoStudio {
     ipcMain.handle('stop-file-watching', () => this.stopFileWatching());
     ipcMain.handle('set-current-file', (_, filePath: string) => this.setCurrentFile(filePath));
     ipcMain.handle('read-file-buffer', (_, filePath: string) => this.readFileBuffer(filePath));
+    ipcMain.handle('write-file-buffer', (_, filePath: string, buffer: ArrayBuffer) => this.writeFileBuffer(filePath, buffer));
   }
 
   private async openProjectDialog(): Promise<string | null> {
@@ -290,6 +291,13 @@ class RhinoStudio {
     const fs = await import('fs/promises');
     const buffer = await fs.readFile(filePath);
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+  }
+
+  private async writeFileBuffer(filePath: string, buffer: ArrayBuffer): Promise<void> {
+    const fsPromises = await import('fs/promises');
+    const nodeBuffer = Buffer.from(buffer);
+    await fsPromises.writeFile(filePath, nodeBuffer);
+    console.log(`File written to: ${filePath}`);
   }
 
   private async saveModelVersion(): Promise<void> {

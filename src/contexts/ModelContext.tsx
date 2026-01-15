@@ -130,6 +130,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Get version control functions
+  // Note: VersionControlProvider must wrap ModelProvider for this to work
   const { markUnsavedChanges, setModelRestoreCallback, createInitialCommit } = useVersionControl();
 
   // Set up model restore callback for version control
@@ -403,6 +404,9 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       const result = await load3dmFile(file);
       setLoadedModel(result);
       
+      // Get the file buffer for exact file storage in commits
+      const fileBuffer = await file.arrayBuffer();
+      
       // Set current file info for version control
       let filePath: string;
       
@@ -437,9 +441,9 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Create initial commit for version control
-      createInitialCommit(result);
-      console.log('Created initial commit for imported model');
+      // Create initial commit for version control with exact file buffer
+      createInitialCommit(result, fileBuffer);
+      console.log('Created initial commit for imported model with file buffer:', fileBuffer.byteLength, 'bytes');
       
     } catch (err) {
       console.error("Failed to load 3DM file:", err);

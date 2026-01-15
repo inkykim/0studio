@@ -145,6 +145,53 @@ async function getRhino3dm(): Promise<any> {
 }
 
 /**
+ * Export LoadedModel to ArrayBuffer (.3dm file buffer)
+ */
+export async function exportModelToBuffer(modelData: { objects: THREE.Object3D[]; metadata: Rhino3dmMetadata }): Promise<ArrayBuffer> {
+  const rhino = await getRhino3dm();
+  const doc = new rhino.File3dm();
+
+  // Traverse all objects and convert meshes
+  modelData.objects.forEach(rootObject => {
+    rootObject.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.geometry) {
+        const rhinoMesh = threeMeshToRhinoMesh(rhino, child);
+        if (rhinoMesh) {
+          const attributes = new rhino.ObjectAttributes();
+          attributes.name = child.name || "Mesh";
+
+          // Set color from material
+          if (child.material instanceof THREE.MeshStandardMaterial) {
+            const color = child.material.color;
+            attributes.objectColor = {
+              r: Math.round(color.r * 255),
+              g: Math.round(color.g * 255),
+              b: Math.round(color.b * 255),
+              a: 255,
+            };
+            attributes.colorSource = rhino.ObjectColorSource.ColorFromObject;
+          }
+
+          doc.objects().add(rhinoMesh, attributes);
+          rhinoMesh.delete();
+        }
+      }
+    });
+  });
+
+  // Convert to byte array
+  const buffer = doc.toByteArray();
+
+  // Create a proper ArrayBuffer copy
+  const arrayBuffer = new ArrayBuffer(buffer.length);
+  const view = new Uint8Array(arrayBuffer);
+  view.set(buffer);
+
+  doc.delete();
+  return arrayBuffer;
+}
+
+/**
  * Export Three.js scene to a .3dm file
  */
 export async function exportTo3dm(

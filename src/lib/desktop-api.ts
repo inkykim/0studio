@@ -129,6 +129,11 @@ class DesktopAPIService {
     return window.electronAPI.readFileBuffer(filePath);
   }
 
+  async writeFileBuffer(filePath: string, buffer: ArrayBuffer): Promise<void> {
+    if (!this.isElectron || !window.electronAPI) return;
+    return window.electronAPI.writeFileBuffer(filePath, buffer);
+  }
+
   // Event Listeners
   onProjectOpened(callback: (project: ProjectInfo) => void): void {
     if (!this.isElectron || !window.electronAPI) return;

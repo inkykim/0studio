@@ -1,27 +1,26 @@
-import { Archive, Clock, RotateCcw, Save, FolderOpen, X, Sparkles, Loader2 } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useState, useEffect } from "react";
+import { useModel } from "@/contexts/ModelContext";
+import { useVersionControl } from "@/contexts/VersionControlContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { useState, useEffect, useCallback } from "react";
-import { useModel } from "@/contexts/ModelContext";
-import { useVersionControl } from "@/contexts/VersionControlContext";
-import { interpretCommitMessage, isGeminiConfigured } from "@/lib/gemini-service";
-import { parseGeminiResponse, executeCommands, SceneCommand } from "@/lib/scene-commands";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Archive, Save, Star, Download, RotateCcw, Search, FolderOpen, X, Grid3x3 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { toast } from "sonner";
 
 const formatTimeAgo = (timestamp: number) => {
   const now = Date.now();
   const diff = now - timestamp;
-  const minutes = Math.floor(diff / (1000 * 60));
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
 
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-  if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-  return `${days} day${days > 1 ? 's' : ''} ago`;
+  if (days > 0) return `${days}d ago`;
+  if (hours > 0) return `${hours}h ago`;
+  if (minutes > 0) return `${minutes}m ago`;
+  return "just now";
 };
 
 export const VersionControl = () => {
@@ -31,12 +30,6 @@ export const VersionControl = () => {
     clearModel, 
     triggerFileDialog, 
     loadedModel,
-    addPrimitive,
-    removeObject,
-    transformObject,
-    setObjectColor,
-    clearGeneratedObjects,
-    generatedObjects,
   } = useModel();
   const { 
     currentModel, 
@@ -44,20 +37,24 @@ export const VersionControl = () => {
     commits, 
     currentCommitId, 
     hasUnsavedChanges,
-    isProcessingAICommit,
     setCurrentModel,
     commitModelChanges,
-    commitWithAI,
     restoreToCommit,
+    pullFromCommit,
     markUnsavedChanges,
     clearCurrentModel,
-    setAICommitCallback,
+    toggleStarCommit,
+    isGalleryMode,
+    selectedCommitIds,
+    toggleGalleryMode,
+    toggleCommitSelection,
+    clearSelectedCommits,
   } = useVersionControl();
   
   const [commitMessage, setCommitMessage] = useState("");
   const [isCommitting, setIsCommitting] = useState(false);
-  const [useAICommit, setUseAICommit] = useState(true); // Default to AI mode when no 3dm changes
-  const [aiError, setAiError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showStarredOnly, setShowStarredOnly] = useState(false);
 
   // When a model file is loaded, update the version control
   useEffect(() => {
@@ -65,58 +62,6 @@ export const VersionControl = () => {
       setCurrentModel(currentFile);
     }
   }, [currentFile, currentModel, setCurrentModel]);
-
-  // Set up the AI commit callback
-  const handleAICommit = useCallback(async (message: string): Promise<{ success: boolean; modelData?: typeof loadedModel; error?: string }> => {
-    // Interpret the commit message using LLM
-    const result = await interpretCommitMessage(message, {
-      generatedObjects: generatedObjects.map(obj => ({
-        id: obj.id,
-        type: obj.type,
-        name: obj.name,
-      })),
-    });
-
-    if (!result.success || result.commands.length === 0) {
-      return { 
-        success: false, 
-        error: result.error || "Could not interpret commit message as modeling instructions" 
-      };
-    }
-
-    // Execute the commands
-    const getLastObjectId = () => {
-      return generatedObjects.length > 0 ? generatedObjects[generatedObjects.length - 1].id : null;
-    };
-
-    const executionResult = executeCommands(result.commands, {
-      addPrimitive,
-      removeObject,
-      transformObject,
-      setObjectColor,
-      clearGeneratedObjects,
-      getLastObjectId,
-    });
-
-    if (!executionResult.success) {
-      return {
-        success: false,
-        error: `Some commands failed: ${executionResult.errors.join(", ")}`,
-      };
-    }
-
-    // Return success with the current model data
-    // Note: The model data will be captured after commands execute
-    return {
-      success: true,
-      modelData: loadedModel || undefined,
-    };
-  }, [generatedObjects, addPrimitive, removeObject, transformObject, setObjectColor, clearGeneratedObjects, loadedModel]);
-
-  // Register the AI commit callback
-  useEffect(() => {
-    setAICommitCallback(handleAICommit);
-  }, [handleAICommit, setAICommitCallback]);
 
   const handleRestoreCommit = async (commitId: string) => {
     try {
@@ -129,48 +74,47 @@ export const VersionControl = () => {
     }
   };
 
-  const handleCommit = async () => {
-    if (!commitMessage.trim() || isCommitting) return;
-    
-    setIsCommitting(true);
-    setAiError(null);
-    
+  const handlePullCommit = async (commitId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering the restore action
     try {
-      // If we have unsaved 3dm changes, use traditional commit
-      if (hasUnsavedChanges && loadedModel) {
-        await commitModelChanges(commitMessage.trim(), loadedModel);
-        setCommitMessage("");
-      } 
-      // Otherwise, if AI mode is enabled, use AI to interpret the message
-      else if (useAICommit && isGeminiConfigured()) {
-        const result = await commitWithAI(commitMessage.trim());
-        if (result.success) {
-          setCommitMessage("");
-        } else {
-          setAiError(result.error || "Failed to process AI commit");
-        }
+      const success = await pullFromCommit(commitId);
+      if (success) {
+        console.log(`File pulled to commit: ${commitId}`);
       }
     } catch (error) {
-      console.error("Failed to commit:", error);
-      setAiError(error instanceof Error ? error.message : "Unknown error");
-    } finally {
-      setIsCommitting(false);
+      console.error("Failed to pull commit:", error);
     }
   };
 
-  // Check if we can make an AI commit (when there are no 3dm changes)
-  const canMakeAICommit = !hasUnsavedChanges && useAICommit && isGeminiConfigured() && currentFile;
-
-  const handleCloseModel = () => {
-    clearModel();
-    clearCurrentModel();
+  const handleCommit = async () => {
+    if (!commitMessage.trim() || isCommitting) return;
+    
+    if (!hasUnsavedChanges || !loadedModel) {
+      return; // Can only commit when there are unsaved changes
+    }
+    
+    setIsCommitting(true);
+    
+    try {
+      await commitModelChanges(commitMessage.trim(), loadedModel);
+      setCommitMessage("");
+    } catch (error) {
+      console.error("Failed to commit:", error);
+      toast.error("Failed to save version");
+    } finally {
+      setIsCommitting(false);
+    }
   };
 
   const handleOpenNewModel = () => {
     triggerFileDialog();
   };
 
-  // If no model is open, show open model UI
+  const handleCloseModel = () => {
+    clearModel();
+    clearCurrentModel();
+  };
+
   if (!currentFile) {
     return (
       <div className="h-full flex flex-col panel-glass">
@@ -256,111 +200,91 @@ export const VersionControl = () => {
             </section>
           )}
 
-          {/* AI Commit Mode - when no external 3dm changes */}
-          {!hasUnsavedChanges && currentFile && (
-            <section>
-              <div className="space-y-4">
-                {/* AI Mode Toggle */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 border border-violet-500/20">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-violet-400" />
-                    <Label htmlFor="ai-mode" className="text-sm font-medium cursor-pointer">
-                      AI Modeling Mode
-                    </Label>
-                  </div>
-                  <Switch
-                    id="ai-mode"
-                    checked={useAICommit}
-                    onCheckedChange={setUseAICommit}
-                    disabled={!isGeminiConfigured()}
-                  />
-                </div>
-
-                {useAICommit && isGeminiConfigured() ? (
-                  <div className="space-y-3">
-                    <p className="text-xs text-muted-foreground">
-                      Describe changes in natural language — the AI will modify the 3D model accordingly.
-                    </p>
-                    <Input
-                      placeholder="e.g., Add a red sphere next to the box..."
-                      value={commitMessage}
-                      onChange={(e) => {
-                        setCommitMessage(e.target.value);
-                        setAiError(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && commitMessage.trim() && !isCommitting && !isProcessingAICommit) {
-                          handleCommit();
-                        }
-                      }}
-                      className="bg-background/50"
-                    />
-                    {aiError && (
-                      <p className="text-xs text-destructive">{aiError}</p>
-                    )}
-                    <Button 
-                      onClick={handleCommit} 
-                      disabled={!commitMessage.trim() || isCommitting || isProcessingAICommit}
-                      className="w-full gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700"
-                    >
-                      {isCommitting || isProcessingAICommit ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Processing with AI...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-4 h-4" />
-                          Apply Changes with AI
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                ) : !isGeminiConfigured() ? (
-                  <div className="text-center py-4">
-                    <p className="text-xs text-muted-foreground">
-                      Configure VITE_GEMINI_API_KEY to enable AI modeling
-                    </p>
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <Clock className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm text-muted-foreground">
-                      No unsaved changes
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Enable AI Mode above to create changes with natural language
-                    </p>
-                  </div>
-                )}
-
-                <div className="border-t border-border/50 pt-3">
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => markUnsavedChanges()} 
-                    className="w-full text-xs text-muted-foreground"
-                  >
-                    Or simulate external file changes
-                  </Button>
-                </div>
-              </div>
-            </section>
-          )}
 
           {/* Version History */}
           <section>
-            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-              Version History ({commits.length})
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Version History ({commits.length})
+              </h3>
+              <div className="flex items-center gap-1">
+                {commits.length > 0 && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleGalleryMode}
+                      className={`h-6 px-2 text-xs ${isGalleryMode ? 'bg-primary/10' : ''}`}
+                      title={isGalleryMode ? 'Exit gallery mode' : 'Enter gallery mode to compare versions'}
+                    >
+                      <Grid3x3 className={`w-3 h-3 mr-1 ${isGalleryMode ? 'text-primary' : ''}`} />
+                      {isGalleryMode ? 'Gallery' : 'Gallery'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowStarredOnly(!showStarredOnly)}
+                      className="h-6 px-2 text-xs"
+                    >
+                      <Star className={`w-3 h-3 mr-1 ${showStarredOnly ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+                      {showStarredOnly ? 'Show All' : 'Starred'}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+            
+            {/* Search Input */}
+            {commits.length > 0 && (
+              <div className="relative mb-3">
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Search by commit message..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 h-8 text-xs"
+                />
+              </div>
+            )}
+            
             <div className="relative">
               {commits.length === 0 ? (
                 <div className="text-center py-4">
                   <p className="text-xs text-muted-foreground">No versions saved yet</p>
                   <p className="text-xs text-muted-foreground mt-1">Save your first version to start tracking changes</p>
                 </div>
-              ) : (
-                commits.map((commit, idx) => {
+              ) : (() => {
+                // Filter commits based on search and starred filter
+                let filteredCommits = commits;
+                
+                if (showStarredOnly) {
+                  filteredCommits = filteredCommits.filter(commit => commit.starred);
+                }
+                
+                if (searchQuery.trim()) {
+                  const query = searchQuery.toLowerCase();
+                  filteredCommits = filteredCommits.filter(commit =>
+                    commit.message.toLowerCase().includes(query)
+                  );
+                }
+                
+                if (filteredCommits.length === 0) {
+                  return (
+                    <div className="text-center py-4">
+                      <p className="text-xs text-muted-foreground">
+                        {showStarredOnly && searchQuery
+                          ? 'No starred commits match your search'
+                          : showStarredOnly
+                          ? 'No starred commits yet'
+                          : 'No commits match your search'}
+                      </p>
+                    </div>
+                  );
+                }
+                
+                return filteredCommits.map((commit, idx) => {
+                  // Find original index for timeline continuity
+                  const originalIdx = commits.findIndex(c => c.id === commit.id);
                   const isCurrentCommit = commit.id === currentCommitId;
                   return (
                     <div 
@@ -368,16 +292,36 @@ export const VersionControl = () => {
                       className={`flex gap-3 group cursor-pointer rounded-md p-2 transition-colors ${
                         isCurrentCommit ? 'bg-primary/10' : 'hover:bg-secondary/50'
                       }`}
-                      onClick={() => !isCurrentCommit && handleRestoreCommit(commit.id)}
+                      onClick={(e) => {
+                        // Don't restore if clicking on star button or pull button
+                        if ((e.target as HTMLElement).closest('.star-button')) return;
+                        if ((e.target as HTMLElement).closest('.pull-button')) return;
+                        if (!isCurrentCommit) handleRestoreCommit(commit.id);
+                      }}
                       title={isCurrentCommit ? 'Current version' : 'Click to restore to this version'}
                     >
-                      {/* Timeline */}
+                      {/* Timeline / Checkbox */}
                       <div className="flex flex-col items-center">
-                        <div className={`w-2 h-2 rounded-full mt-1.5 ${
-                          isCurrentCommit ? 'bg-primary' : 'bg-muted-foreground/40'
-                        }`} />
-                        {idx < commits.length - 1 && (
-                          <div className="w-px bg-border my-1" style={{ minHeight: "32px" }} />
+                        {isGalleryMode ? (
+                          <>
+                            <Checkbox
+                              checked={selectedCommitIds.has(commit.id)}
+                              onCheckedChange={() => toggleCommitSelection(commit.id)}
+                              className="mt-1.5"
+                            />
+                            {idx < filteredCommits.length - 1 && (
+                              <div className="w-px bg-border my-1" style={{ minHeight: "32px" }} />
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className={`w-2 h-2 rounded-full mt-1.5 ${
+                              isCurrentCommit ? 'bg-primary' : commit.starred ? 'bg-yellow-400' : 'bg-muted-foreground/40'
+                            }`} />
+                            {idx < filteredCommits.length - 1 && (
+                              <div className="w-px bg-border my-1" style={{ minHeight: "32px" }} />
+                            )}
+                          </>
                         )}
                       </div>
                       
@@ -385,6 +329,22 @@ export const VersionControl = () => {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <button
+                              className="star-button p-0.5 hover:bg-secondary rounded transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleStarCommit(commit.id);
+                              }}
+                              title={commit.starred ? 'Unstar this commit' : 'Star this commit'}
+                            >
+                              <Star 
+                                className={`w-3.5 h-3.5 ${
+                                  commit.starred 
+                                    ? 'fill-yellow-400 text-yellow-400' 
+                                    : 'text-muted-foreground hover:text-yellow-400'
+                                } transition-colors`} 
+                              />
+                            </button>
                             <p className="text-sm font-medium truncate">{commit.message}</p>
                             {isCurrentCommit && (
                               <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
@@ -393,7 +353,7 @@ export const VersionControl = () => {
                             )}
                           </div>
                           <span className="text-code text-xs text-muted-foreground shrink-0">
-                            v{commits.length - idx}
+                            v{commits.length - originalIdx}
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
@@ -401,16 +361,25 @@ export const VersionControl = () => {
                         </p>
                       </div>
                       
-                      {/* Restore indicator on hover */}
+                      {/* Action buttons on hover */}
                       {!isCurrentCommit && (
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center">
-                          <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                          <button
+                            className="pull-button p-1 hover:bg-secondary rounded transition-colors"
+                            onClick={(e) => handlePullCommit(commit.id, e)}
+                            title="Pull this version to local file (updates file on disk)"
+                          >
+                            <Download className="w-3.5 h-3.5 text-muted-foreground hover:text-primary" />
+                          </button>
+                          <div className="flex items-center">
+                            <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
+                          </div>
                         </div>
                       )}
                     </div>
                   );
-                })
-              )}
+                });
+              })()}
             </div>
           </section>
         </div>
