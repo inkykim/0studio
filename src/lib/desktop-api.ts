@@ -131,7 +131,28 @@ class DesktopAPIService {
 
   async writeFileBuffer(filePath: string, buffer: ArrayBuffer): Promise<void> {
     if (!this.isElectron || !window.electronAPI) return;
-    return window.electronAPI.writeFileBuffer(filePath, buffer);
+    return (window.electronAPI as any).writeFileBuffer(filePath, buffer);
+  }
+
+  // File storage (0studio commit storage)
+  async saveCommitFile(filePath: string, commitId: string, buffer: ArrayBuffer): Promise<void> {
+    if (!this.isElectron || !window.electronAPI) return;
+    return (window.electronAPI as any).saveCommitFile(filePath, commitId, buffer);
+  }
+
+  async readCommitFile(filePath: string, commitId: string): Promise<ArrayBuffer | null> {
+    if (!this.isElectron || !window.electronAPI) return null;
+    return (window.electronAPI as any).readCommitFile(filePath, commitId);
+  }
+
+  async listCommitFiles(filePath: string): Promise<string[]> {
+    if (!this.isElectron || !window.electronAPI) return [];
+    return (window.electronAPI as any).listCommitFiles(filePath);
+  }
+
+  async commitFileExists(filePath: string, commitId: string): Promise<boolean> {
+    if (!this.isElectron || !window.electronAPI) return false;
+    return (window.electronAPI as any).commitFileExists(filePath, commitId);
   }
 
   // Event Listeners

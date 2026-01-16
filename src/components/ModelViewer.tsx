@@ -500,7 +500,7 @@ export const ModelViewer = () => {
     triggerFileDialog,
   } = useModel();
   
-  const { isGalleryMode, selectedCommitIds, commits } = useVersionControl();
+  const { isGalleryMode, selectedCommitIds, commits, currentCommitId } = useVersionControl();
 
   const [isDragOver, setIsDragOver] = useState(false);
   
@@ -739,6 +739,7 @@ export const ModelViewer = () => {
         ) : (
           <div className="flex-1 relative">
             <Canvas
+              key={loadedModel ? `canvas-${currentCommitId || 'default'}-${loadedModel.metadata.fileName}` : 'canvas-empty'}
               camera={{ position: [5, 5, 8], fov: 50 }}
               dpr={[1, 2]}
               gl={{ antialias: true, alpha: true }}

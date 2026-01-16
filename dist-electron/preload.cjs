@@ -22,6 +22,11 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     setCurrentFile: (filePath) => electron_1.ipcRenderer.invoke('set-current-file', filePath),
     readFileBuffer: (filePath) => electron_1.ipcRenderer.invoke('read-file-buffer', filePath),
     writeFileBuffer: (filePath, buffer) => electron_1.ipcRenderer.invoke('write-file-buffer', filePath, buffer),
+    // File storage (0studio commit storage)
+    saveCommitFile: (filePath, commitId, buffer) => electron_1.ipcRenderer.invoke('save-commit-file', filePath, commitId, buffer),
+    readCommitFile: (filePath, commitId) => electron_1.ipcRenderer.invoke('read-commit-file', filePath, commitId),
+    listCommitFiles: (filePath) => electron_1.ipcRenderer.invoke('list-commit-files', filePath),
+    commitFileExists: (filePath, commitId) => electron_1.ipcRenderer.invoke('commit-file-exists', filePath, commitId),
     // Event listeners
     onProjectOpened: (callback) => {
         electron_1.ipcRenderer.on('project-opened', (_, project) => callback(project));

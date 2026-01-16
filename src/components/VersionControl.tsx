@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Archive, Save, Star, Download, RotateCcw, Search, FolderOpen, X, Grid3x3 } from "lucide-react";
+import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 
@@ -226,7 +226,7 @@ export const VersionControl = () => {
                       onClick={() => setShowStarredOnly(!showStarredOnly)}
                       className="h-6 px-2 text-xs"
                     >
-                      <Star className={`w-3 h-3 mr-1 ${showStarredOnly ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+                      <Star className={`w-3 h-3 mr-1 ${showStarredOnly ? 'fill-foreground text-foreground' : 'text-muted-foreground'}`} />
                       {showStarredOnly ? 'Show All' : 'Starred'}
                     </Button>
                   </>
@@ -324,7 +324,7 @@ export const VersionControl = () => {
                         ) : (
                           <>
                             <div className={`w-2 h-2 rounded-full mt-1.5 ${
-                              isCurrentCommit ? 'bg-primary' : commit.starred ? 'bg-yellow-400' : 'bg-muted-foreground/40'
+                              isCurrentCommit ? 'bg-primary' : 'bg-muted-foreground/40'
                             }`} />
                             {idx < filteredCommits.length - 1 && (
                               <div className="w-px bg-border my-1" style={{ minHeight: "32px" }} />
@@ -348,8 +348,8 @@ export const VersionControl = () => {
                               <Star 
                                 className={`w-3.5 h-3.5 ${
                                   commit.starred 
-                                    ? 'fill-yellow-400 text-yellow-400' 
-                                    : 'text-muted-foreground hover:text-yellow-400'
+                                    ? 'fill-foreground text-foreground' 
+                                    : 'text-muted-foreground hover:text-foreground'
                                 } transition-colors`} 
                               />
                             </button>
@@ -370,20 +370,15 @@ export const VersionControl = () => {
                       </div>
                       
                       {/* Action buttons on hover */}
-                      {!isCurrentCommit && (
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                          <button
-                            className="pull-button p-1 hover:bg-secondary rounded transition-colors"
-                            onClick={(e) => handlePullCommit(commit.id, e)}
-                            title="Pull this version to local file (updates file on disk)"
-                          >
-                            <Download className="w-3.5 h-3.5 text-muted-foreground hover:text-primary" />
-                          </button>
-                          <div className="flex items-center">
-                            <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
-                          </div>
-                        </div>
-                      )}
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                        <button
+                          className="pull-button p-1 hover:bg-secondary rounded transition-colors"
+                          onClick={(e) => handlePullCommit(commit.id, e)}
+                          title="Pull this version to local file (updates file on disk)"
+                        >
+                          <Download className="w-3.5 h-3.5 text-muted-foreground hover:text-primary" />
+                        </button>
+                      </div>
                     </div>
                   );
                 });

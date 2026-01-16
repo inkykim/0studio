@@ -3,6 +3,7 @@ import { join, dirname, basename } from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { FileWatcherService } from './services/file-watcher.js';
+import { FileStorageService } from './services/file-storage-service.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 class RhinoStudio {
@@ -11,6 +12,7 @@ class RhinoStudio {
         this.currentProjectFile = null;
         this.fileWatcher = null;
         this.gitService = null;
+        this.fileStorage = new FileStorageService();
         this.setupApp();
         this.setupIPC();
         this.createMenu();
@@ -183,6 +185,11 @@ class RhinoStudio {
         ipcMain.handle('set-current-file', (_, filePath) => this.setCurrentFile(filePath));
         ipcMain.handle('read-file-buffer', (_, filePath) => this.readFileBuffer(filePath));
         ipcMain.handle('write-file-buffer', (_, filePath, buffer) => this.writeFileBuffer(filePath, buffer));
+        // File storage (0studio commit storage)
+        ipcMain.handle('save-commit-file', (_, filePath, commitId, buffer) => this.saveCommitFile(filePath, commitId, buffer));
+        ipcMain.handle('read-commit-file', (_, filePath, commitId) => this.readCommitFile(filePath, commitId));
+        ipcMain.handle('list-commit-files', (_, filePath) => this.listCommitFiles(filePath));
+        ipcMain.handle('commit-file-exists', (_, filePath, commitId) => this.commitFileExists(filePath, commitId));
     }
     async openProjectDialog() {
         const result = await dialog.showOpenDialog(this.mainWindow, {
@@ -263,6 +270,19 @@ class RhinoStudio {
         const nodeBuffer = Buffer.from(buffer);
         await fsPromises.writeFile(filePath, nodeBuffer);
         console.log(`File written to: ${filePath}`);
+    }
+    // File storage methods for 0studio commit storage
+    async saveCommitFile(filePath, commitId, buffer) {
+        await this.fileStorage.saveCommitFile(filePath, commitId, buffer);
+    }
+    async readCommitFile(filePath, commitId) {
+        return await this.fileStorage.readCommitFile(filePath, commitId);
+    }
+    async listCommitFiles(filePath) {
+        return await this.fileStorage.listCommitFiles(filePath);
+    }
+    commitFileExists(filePath, commitId) {
+        return this.fileStorage.commitFileExists(filePath, commitId);
     }
     async saveModelVersion() {
         if (!this.currentProjectFile) {

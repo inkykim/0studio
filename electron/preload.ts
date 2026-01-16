@@ -53,6 +53,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       readFileBuffer: (filePath: string) => ipcRenderer.invoke('read-file-buffer', filePath),
       writeFileBuffer: (filePath: string, buffer: ArrayBuffer) => ipcRenderer.invoke('write-file-buffer', filePath, buffer),
 
+      // File storage (0studio commit storage)
+      saveCommitFile: (filePath: string, commitId: string, buffer: ArrayBuffer) => 
+        ipcRenderer.invoke('save-commit-file', filePath, commitId, buffer),
+      readCommitFile: (filePath: string, commitId: string) => 
+        ipcRenderer.invoke('read-commit-file', filePath, commitId),
+      listCommitFiles: (filePath: string) => 
+        ipcRenderer.invoke('list-commit-files', filePath),
+      commitFileExists: (filePath: string, commitId: string) => 
+        ipcRenderer.invoke('commit-file-exists', filePath, commitId),
+
       // Event listeners
   onProjectOpened: (callback: (project: ProjectInfo) => void) => {
     ipcRenderer.on('project-opened', (_, project) => callback(project));
@@ -101,6 +111,12 @@ declare global {
       setCurrentFile: (filePath: string) => Promise<void>;
       readFileBuffer: (filePath: string) => Promise<ArrayBuffer>;
       writeFileBuffer: (filePath: string, buffer: ArrayBuffer) => Promise<void>;
+      
+      // File storage (0studio commit storage)
+      saveCommitFile: (filePath: string, commitId: string, buffer: ArrayBuffer) => Promise<void>;
+      readCommitFile: (filePath: string, commitId: string) => Promise<ArrayBuffer | null>;
+      listCommitFiles: (filePath: string) => Promise<string[]>;
+      commitFileExists: (filePath: string, commitId: string) => Promise<boolean>;
       
       onProjectOpened: (callback: (project: ProjectInfo) => void) => void;
       onProjectClosed: (callback: () => void) => void;

@@ -50,6 +50,13 @@ declare global {
       stopFileWatching: () => Promise<void>;
       setCurrentFile: (filePath: string) => Promise<void>;
       readFileBuffer: (filePath: string) => Promise<ArrayBuffer>;
+      writeFileBuffer: (filePath: string, buffer: ArrayBuffer) => Promise<void>;
+      
+      // File storage (0studio commit storage)
+      saveCommitFile: (filePath: string, commitId: string, buffer: ArrayBuffer) => Promise<void>;
+      readCommitFile: (filePath: string, commitId: string) => Promise<ArrayBuffer | null>;
+      listCommitFiles: (filePath: string) => Promise<string[]>;
+      commitFileExists: (filePath: string, commitId: string) => Promise<boolean>;
       
       onProjectOpened: (callback: (project: ProjectInfo) => void) => void;
       onProjectClosed: (callback: () => void) => void;

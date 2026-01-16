@@ -138,7 +138,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     const handleModelRestore = (modelData: LoadedModel) => {
       console.log('Restoring model from version control:', modelData);
       setLoadedModel(modelData);
-      setStats(modelData.stats);
+      // Stats will be recalculated by SceneStatsCalculator in ModelViewer
     };
 
     setModelRestoreCallback(handleModelRestore);
@@ -192,7 +192,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         // Load the updated model
         const result = await load3dmFile(file);
         setLoadedModel(result);
-        setStats(result.stats);
+        // Stats will be recalculated by SceneStatsCalculator in ModelViewer
         
         console.log('Model successfully reloaded from disk with updated geometry');
       } else {
@@ -442,7 +442,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       }
 
       // Create initial commit for version control with exact file buffer
-      createInitialCommit(result, fileBuffer);
+      // Pass filePath to ensure the commit is saved even if currentModel isn't set yet
+      await createInitialCommit(result, fileBuffer, filePath);
       console.log('Created initial commit for imported model with file buffer:', fileBuffer.byteLength, 'bytes');
       
     } catch (err) {
