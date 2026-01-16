@@ -673,7 +673,28 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setHasUnsavedChanges(false);
     setCurrentProjectId(null);
     setIsCloudEnabled(false);
+    // Reset gallery mode when closing project
+    setIsGalleryMode(false);
+    setSelectedCommitIds(new Set());
   }, []);
+
+  // Handle project-closed event from Electron
+  useEffect(() => {
+    if (!desktopAPI.isDesktop) return;
+
+    const handleProjectClosed = () => {
+      console.log('Project closed event received, clearing model and resetting gallery mode');
+      clearCurrentModel();
+    };
+
+    // Set up project closed listener
+    desktopAPI.onProjectClosed(handleProjectClosed);
+
+    // Cleanup
+    return () => {
+      desktopAPI.removeAllListeners('project-closed');
+    };
+  }, [clearCurrentModel]);
 
   // Pull commits from cloud storage
   const pullFromCloud = useCallback(async (): Promise<void> => {
@@ -774,9 +795,13 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setSelectedCommitIds(prev => {
       const newSet = new Set(prev);
       if (newSet.has(commitId)) {
+        // Allow deselecting even if at max
         newSet.delete(commitId);
       } else {
-        newSet.add(commitId);
+        // Only allow adding if under the limit of 4
+        if (newSet.size < 4) {
+          newSet.add(commitId);
+        }
       }
       return newSet;
     });

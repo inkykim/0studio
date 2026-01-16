@@ -504,10 +504,12 @@ export const ModelViewer = () => {
 
   const [isDragOver, setIsDragOver] = useState(false);
   
-  // Get selected commits for gallery mode
+  // Get selected commits for gallery mode (capped at 4)
   const selectedCommits = useMemo(() => {
     if (!isGalleryMode || selectedCommitIds.size === 0) return [];
-    return commits.filter(commit => selectedCommitIds.has(commit.id));
+    const filtered = commits.filter(commit => selectedCommitIds.has(commit.id));
+    // Ensure we only show up to 4 commits
+    return filtered.slice(0, 4);
   }, [isGalleryMode, selectedCommitIds, commits]);
 
   // Safety check for stats - provide default values if undefined
@@ -631,55 +633,108 @@ export const ModelViewer = () => {
 
         {/* Canvas - Gallery mode or single view */}
         {isGalleryMode && selectedCommits.length > 0 ? (
-          <div className="flex-1 relative grid gap-2 p-2" style={{
-            gridTemplateColumns: `repeat(${Math.min(selectedCommits.length, 4)}, 1fr)`,
-            gridTemplateRows: selectedCommits.length > 4 ? 'repeat(2, 1fr)' : '1fr',
-          }}>
-            {selectedCommits.map((commit) => (
-              <div key={commit.id} className="relative border border-border rounded-md overflow-hidden bg-background">
-                <div className="absolute top-2 left-2 z-10 bg-background/80 backdrop-blur-sm px-2 py-1 rounded text-xs font-medium">
-                  {commit.message}
-                </div>
-                <Canvas
-                  camera={{ position: [5, 5, 8], fov: 50 }}
-                  dpr={[1, 2]}
-                  gl={{ antialias: true, alpha: true }}
+          <div 
+            key={`gallery-${selectedCommits.length}`}
+            className="flex-1 relative grid gap-2 p-2" 
+            style={{
+              gridTemplateColumns: selectedCommits.length === 1 ? '1fr' : 'repeat(2, 1fr)',
+              gridTemplateRows: 
+                selectedCommits.length === 1 
+                  ? '1fr' 
+                  : selectedCommits.length === 2 
+                  ? '1fr' 
+                  : 'repeat(2, 1fr)',
+            }}
+          >
+            {selectedCommits.map((commit, index) => {
+              // Determine grid layout based on number of commits
+              const count = selectedCommits.length;
+              let gridStyle: React.CSSProperties = {};
+              
+              if (count === 1) {
+                // 1 commit: full width (no explicit positioning needed)
+                gridStyle = {};
+              } else if (count === 2) {
+                // 2 commits: side by side in row 1
+                gridStyle = {
+                  gridRow: '1',
+                  gridColumn: index === 0 ? '1' : '2',
+                };
+              } else if (count === 3) {
+                // 3 commits: 2 on top, 1 centered on bottom
+                if (index < 2) {
+                  // First two commits in top row
+                  gridStyle = {
+                    gridRow: '1',
+                    gridColumn: index === 0 ? '1' : '2',
+                  };
+                } else {
+                  // Third commit spans both columns in row 2, taking full width
+                  gridStyle = { 
+                    gridRow: '2',
+                    gridColumn: '1 / -1',
+                  };
+                }
+              } else if (count === 4) {
+                // 4 commits: 2x2 grid
+                const row = Math.floor(index / 2) + 1; // 1 or 2
+                const col = (index % 2) + 1; // 1 or 2
+                gridStyle = {
+                  gridRow: `${row}`,
+                  gridColumn: `${col}`,
+                };
+              }
+              
+              return (
+                <div 
+                  key={commit.id} 
+                  className="relative border border-border rounded-md overflow-hidden bg-background"
+                  style={gridStyle}
                 >
-                  <color attach="background" args={["#0a0a0a"]} />
-                  <ambientLight intensity={0.8} />
-                  <directionalLight
-                    position={[10, 10, 10]}
-                    intensity={1.5}
-                    color="#ffffff"
-                    castShadow
-                  />
-                  <directionalLight
-                    position={[-10, -5, -10]}
-                    intensity={0.8}
-                    color="#ffffff"
-                  />
-                  <directionalLight
-                    position={[0, -10, 0]}
-                    intensity={0.5}
-                    color="#ffffff"
-                  />
-                  <hemisphereLight
-                    args={["#ffffff", "#444444", 0.6]}
-                  />
-                  <SceneContent onSceneReady={() => {}} modelData={commit.modelData || null} />
-                  <OrbitControls
-                    enablePan={true}
-                    enableZoom={true}
-                    enableRotate={true}
-                    enableDamping={true}
-                    dampingFactor={0.05}
-                    minDistance={0.5}
-                    maxDistance={200}
-                    makeDefault
-                  />
-                </Canvas>
-              </div>
-            ))}
+                  <div className="absolute top-2 left-2 z-10 bg-background/80 backdrop-blur-sm px-2 py-1 rounded text-xs font-medium">
+                    {commit.message}
+                  </div>
+                  <Canvas
+                    camera={{ position: [5, 5, 8], fov: 50 }}
+                    dpr={[1, 2]}
+                    gl={{ antialias: true, alpha: true }}
+                  >
+                    <color attach="background" args={["#0a0a0a"]} />
+                    <ambientLight intensity={0.8} />
+                    <directionalLight
+                      position={[10, 10, 10]}
+                      intensity={1.5}
+                      color="#ffffff"
+                      castShadow
+                    />
+                    <directionalLight
+                      position={[-10, -5, -10]}
+                      intensity={0.8}
+                      color="#ffffff"
+                    />
+                    <directionalLight
+                      position={[0, -10, 0]}
+                      intensity={0.5}
+                      color="#ffffff"
+                    />
+                    <hemisphereLight
+                      args={["#ffffff", "#444444", 0.6]}
+                    />
+                    <SceneContent onSceneReady={() => {}} modelData={commit.modelData || null} />
+                    <OrbitControls
+                      enablePan={true}
+                      enableZoom={true}
+                      enableRotate={true}
+                      enableDamping={true}
+                      dampingFactor={0.05}
+                      minDistance={0.5}
+                      maxDistance={200}
+                      makeDefault
+                    />
+                  </Canvas>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="flex-1 relative">

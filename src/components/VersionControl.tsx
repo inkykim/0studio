@@ -307,7 +307,15 @@ export const VersionControl = () => {
                             <Checkbox
                               checked={selectedCommitIds.has(commit.id)}
                               onCheckedChange={() => toggleCommitSelection(commit.id)}
+                              disabled={!selectedCommitIds.has(commit.id) && selectedCommitIds.size >= 4}
                               className="mt-1.5"
+                              title={
+                                !selectedCommitIds.has(commit.id) && selectedCommitIds.size >= 4
+                                  ? 'Maximum of 4 models can be selected for gallery view'
+                                  : selectedCommitIds.has(commit.id)
+                                  ? 'Click to deselect'
+                                  : 'Click to select for gallery view'
+                              }
                             />
                             {idx < filteredCommits.length - 1 && (
                               <div className="w-px bg-border my-1" style={{ minHeight: "32px" }} />
