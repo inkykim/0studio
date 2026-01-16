@@ -1,12 +1,7 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2024-12-20
-**Recent Updates:** 
-- Stripe payment integration fully implemented
-- Payment plans managed via Stripe subscriptions in Supabase `subscriptions` table
-- Backend API includes Stripe Checkout and webhook handlers
-- AuthContext loads payment status from backend API
-- Dashboard integrates with Stripe Checkout for subscription creation
+**Last Updated:** 2024-12-20  
+**Version:** 1.0.0  
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -22,6 +17,7 @@
 7. [API Contracts & Interfaces](#api-contracts--interfaces)
 8. [Development Guidelines](#development-guidelines)
 9. [Key Workflows](#key-workflows)
+10. [Recent Updates & Features](#recent-updates--features)
 
 ---
 
@@ -34,21 +30,24 @@
 - **File-Based Projects**: Open any .3dm file as a project
 - **Auto-Detection**: Automatically detects when .3dm files are saved in Rhino
 - **Git Integration**: Full version control with commit, push, pull operations
-- **Visual Timeline**: Browse through model history
+- **Visual Timeline**: Browse through model history with intuitive timeline UI
+- **Gallery Mode**: Compare up to 4 model versions side-by-side in adaptive grid layouts
 - **AI-Powered Commits**: Use natural language to describe changes, AI interprets and applies them
 - **3D Model Viewer**: Interactive Three.js-based viewer for .3dm files
 - **Scene Manipulation**: Create, transform, and modify 3D primitives programmatically
-- **macOS Native**: Built specifically for macOS with proper file associations
+- **Cloud Storage**: Sync models to AWS S3 with versioning and Supabase database
 - **Payment Plans**: Student and Enterprise plans that unlock cloud storage features
+- **macOS Native**: Built specifically for macOS with proper file associations
 
 ### Project Structure
 
 - **Frontend**: React + TypeScript + Vite
-- **Backend**: Electron (main process)
+- **Backend**: Electron (main process) + Node.js/Express API server
 - **3D Rendering**: Three.js + React Three Fiber
 - **Version Control**: Git via simple-git (local) + Supabase (cloud)
 - **Cloud Storage**: AWS S3 with versioning
 - **Authentication**: Supabase Auth
+- **Payments**: Stripe subscriptions
 - **AI Integration**: Google Gemini API
 
 ---
@@ -112,16 +111,21 @@
 └───────────────────────────────────────────────────────────────┘
                              │
                     ┌────────▼────────┐
-                    │   Supabase      │
-                    │   (Database +   │
-                    │    Auth)        │
+                    │   Backend API   │
+                    │  (Node/Express) │
+                    │  ┌──────────┐  │
+                    │  │  Stripe  │  │
+                    │  │  Webhook │  │
+                    │  └──────────┘  │
                     └────────┬────────┘
                              │
-                    ┌────────▼────────┐
-                    │   AWS S3        │
-                    │   (File Storage │
-                    │    + Versioning)│
-                    └─────────────────┘
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+┌───────▼────────┐  ┌─────────▼─────────┐  ┌────▼──────┐
+│   Supabase    │  │      AWS S3        │  │  Stripe   │
+│   (Database + │  │   (File Storage +  │  │ (Payments)│
+│    Auth)      │  │    Versioning)     │  │           │
+└───────────────┘  └────────────────────┘  └───────────┘
 ```
 
 ### Process Communication
@@ -129,6 +133,7 @@
 1. **Main Process → Renderer**: IPC events (`ipcMain.send`)
 2. **Renderer → Main Process**: IPC invokes (`ipcRenderer.invoke`)
 3. **Preload Bridge**: Exposes safe API via `contextBridge.exposeInMainWorld`
+4. **Backend API**: RESTful API for cloud operations and payments
 
 ---
 
@@ -142,6 +147,7 @@
 - **TanStack Query 5.83.0**: Server state management
 - **Tailwind CSS 3.4.17**: Styling
 - **Shadcn UI**: Component library (Radix UI primitives)
+- **Sonner**: Toast notifications
 
 ### 3D Rendering
 - **Three.js 0.160.1**: 3D graphics library
@@ -155,8 +161,12 @@
 - **simple-git 3.27.0**: Git operations
 
 ### Cloud & Authentication
-- **@supabase/supabase-js**: Supabase client for auth and database
+- **@supabase/supabase-js 2.90.0**: Supabase client for auth and database
 - **AWS S3**: File storage with versioning (via backend API)
+
+### Payments
+- **@stripe/stripe-js 4.10.0**: Stripe client SDK
+- **Stripe Subscriptions**: Recurring payment plans
 
 ### AI & Utilities
 - **@google/generative-ai 0.21.0**: Google Gemini API
@@ -186,28 +196,40 @@
 │   ├── App.tsx          # Root React component
 │   │
 │   ├── components/      # React components
-│   │   ├── ModelViewer.tsx      # 3D model viewer component
+│   │   ├── ModelViewer.tsx      # 3D model viewer with gallery mode
 │   │   ├── VersionControl.tsx   # Version control UI
-│   │   ├── CopilotChat.tsx     # AI chat interface (commented out)
-│   │   ├── TitleBar.tsx        # macOS title bar with user menu dropdown
+│   │   ├── Auth.tsx            # Authentication UI
+│   │   ├── TitleBar.tsx        # macOS title bar with user menu
 │   │   └── ui/                 # Shadcn UI components
 │   │
 │   ├── contexts/        # React contexts (state management)
 │   │   ├── ModelContext.tsx           # 3D model state
-│   │   └── VersionControlContext.tsx  # Version control state
+│   │   ├── VersionControlContext.tsx  # Version control state
+│   │   └── AuthContext.tsx            # Authentication state
 │   │
 │   ├── lib/             # Core libraries and services
 │   │   ├── desktop-api.ts        # Electron IPC wrapper
 │   │   ├── gemini-service.ts     # Google Gemini AI integration
 │   │   ├── rhino3dm-service.ts   # Rhino file loading/exporting
-│   │   ├── scene-commands.ts     # Scene manipulation commands
-│   │   └── utils.ts              # Utility functions
+│   │   ├── scene-commands.ts    # Scene manipulation commands
+│   │   ├── supabase-api.ts      # Supabase database operations
+│   │   ├── aws-api.ts           # AWS S3 operations
+│   │   ├── commit-storage.ts    # IndexedDB storage for commits
+│   │   └── utils.ts             # Utility functions
 │   │
 │   ├── pages/           # Page components
 │   │   ├── Index.tsx    # Main application page
+│   │   ├── Dashboard.tsx # Payment plan selection
 │   │   └── NotFound.tsx # 404 page
 │   │
 │   └── hooks/           # Custom React hooks
+│       ├── use-cloud-pull.ts    # Cloud pull with payment validation
+│       └── use-mobile.tsx       # Mobile detection
+│
+├── backend/             # Backend API server
+│   ├── server.js       # Express server
+│   ├── test-setup.js   # Setup verification
+│   └── package.json    # Backend dependencies
 │
 ├── dist/                # Built React app (production)
 ├── dist-electron/       # Built Electron app
@@ -246,7 +268,7 @@
 **`src/App.tsx`**
 - Root component
 - Sets up QueryClient, TooltipProvider, Toasters
-- Renders Index page
+- Renders routing with React Router
 
 **`src/pages/Index.tsx`**
 - Main application layout
@@ -265,7 +287,16 @@
 - Tracks commits, current commit, unsaved changes
 - Handles commit creation (regular and AI-powered)
 - Provides model restoration from commits
+- Manages gallery mode state (selection, toggle)
 - Coordinates with ModelContext via callbacks
+- Handles cloud sync with Supabase and S3
+
+**`src/contexts/AuthContext.tsx`**
+- Authentication state management using Supabase Auth
+- Provides: signUp, signIn, signOut, resetPassword, refreshPaymentStatus
+- Tracks user session and loading state
+- Manages payment plan state (student/enterprise/none) from backend API
+- Auto-refreshes tokens and persists sessions
 
 **`src/lib/desktop-api.ts`**
 - Singleton service wrapping Electron IPC
@@ -273,7 +304,7 @@
   - Project management (open, close, get current)
   - Git operations (init, status, commit, log, checkout, push, pull)
   - File watching (start, stop, set current file)
-  - File reading (readFileBuffer)
+  - File reading/writing (readFileBuffer, writeFileBuffer)
 - Event listeners for IPC events
 
 **`src/lib/rhino3dm-service.ts`**
@@ -291,11 +322,6 @@
 - System prompts define AI capabilities and command format
 - Returns JSON commands that can be executed
 
-**`src/lib/supabase.ts`**
-- Supabase client configuration
-- TypeScript types for database schema (projects, commits, branches)
-- Exports singleton `supabase` client instance
-
 **`src/lib/supabase-api.ts`**
 - API service for Supabase database operations
 - Methods for projects, commits, and branches CRUD operations
@@ -303,21 +329,43 @@
 - Singleton instance exported as `supabaseAPI`
 
 **`src/lib/aws-api.ts`**
-- AWS S3 API service (currently dummy implementation)
+- AWS S3 API service (via backend API)
 - Methods for presigned URLs (upload/download)
 - File upload/download with version ID tracking
-- Will be replaced with actual AWS SDK integration
+- S3 key generation helpers
 - Singleton instance exported as `awsS3API`
 
-**`src/contexts/AuthContext.tsx`**
-- Authentication state management using Supabase Auth
-- Provides: signUp, signIn, signOut, resetPassword, refreshPaymentStatus
-- Tracks user session and loading state
-- Manages payment plan state (student/enterprise/none) from backend API
-- Auto-refreshes tokens and persists sessions
-- Payment plan loaded from backend API (`/api/stripe/payment-status`)
-- Falls back to localStorage for backward compatibility
-- `refreshPaymentStatus()` method to reload payment plan from backend
+**`src/components/ModelViewer.tsx`**
+- React Three Fiber canvas for 3D rendering
+- Displays loaded .3dm models
+- Renders generated primitives
+- Provides camera controls and lighting
+- **Gallery Mode**: Adaptive grid layouts for comparing multiple versions
+  - 2 models: Side by side
+  - 3 models: 2 on top, 1 full-width on bottom
+  - 4 models: 2x2 grid
+- Integrates with ModelContext
+
+**`src/components/VersionControl.tsx`**
+- UI for version control operations
+- Shows commit history, current commit, unsaved changes
+- Commit dialog with AI option
+- Restore to commit functionality
+- **Gallery Mode Toggle**: Button to enter/exit gallery mode
+- **Commit Selection**: Checkboxes to select commits for gallery (max 4)
+- Search and filter commits
+- Star/unstar commits
+- Integrates with VersionControlContext
+
+**`src/components/Auth.tsx`**
+- Authentication UI components
+- `AuthDialog`: Login/Signup dialog with tabs
+- `ResetPasswordDialog`: Password reset flow
+- `UserMenu`: Dropdown menu triggered by clicking user email
+  - Shows user email as clickable trigger button
+  - Dropdown contains: Dashboard option (with icon) and Sign Out option (with icon)
+  - Uses Shadcn DropdownMenu component
+  - If user not logged in, shows AuthDialog instead
 
 **`src/pages/Dashboard.tsx`**
 - Dashboard UI for selecting payment plans via Stripe Checkout
@@ -326,9 +374,7 @@
 - Integrates with Stripe Checkout for subscription creation
 - Handles Stripe redirect callbacks (success/cancel)
 - Accessible via `/dashboard` route
-- Requires both `VersionControlProvider` and `ModelProvider` (ModelProvider uses useVersionControl internally)
-- Wrapped with providers to support TitleBar component
-- Uses `InteractivePricingCard` component for plan selection
+- Requires both `VersionControlProvider` and `ModelProvider`
 
 **`src/hooks/use-cloud-pull.ts`**
 - Hook for cloud pull operations with payment plan validation
@@ -342,31 +388,10 @@
 - Executes commands via CommandExecutor interface
 - Validates command structure
 
-**`src/components/ModelViewer.tsx`**
-- React Three Fiber canvas for 3D rendering
-- Displays loaded .3dm models
-- Renders generated primitives
-- Provides camera controls and lighting
-- Integrates with ModelContext
-
-**`src/components/VersionControl.tsx`**
-- UI for version control operations
-- Shows commit history, current commit, unsaved changes
-- Commit dialog with AI option
-- Restore to commit functionality
-- Integrates with VersionControlContext
-
-**`src/components/Auth.tsx`**
-- Authentication UI components
-- `AuthDialog`: Login/Signup dialog with tabs
-- `ResetPasswordDialog`: Password reset flow
-- `UserMenu`: Dropdown menu triggered by clicking user email
-  - Shows user email as clickable trigger button
-  - Dropdown contains: Dashboard option (with icon) and Sign Out option (with icon)
-  - Uses Shadcn DropdownMenu component
-  - If user not logged in, shows AuthDialog instead
-- Uses Shadcn Forms for validation
-- Integrates with AuthContext and React Router for navigation
+**`src/lib/commit-storage.ts`**
+- IndexedDB storage for commit file buffers
+- Stores large file buffers separately from localStorage
+- Provides: storeFileBuffer, getFileBuffer
 
 ---
 
@@ -409,19 +434,56 @@
 - `currentCommitId`: ID of currently active commit
 - `hasUnsavedChanges`: Whether model has uncommitted changes
 - `isProcessingAICommit`: Whether AI commit is in progress
+- `isGalleryMode`: Whether gallery mode is active
+- `selectedCommitIds`: Set of commit IDs selected for gallery (max 4)
+- `isCloudEnabled`: Whether cloud sync is enabled
+- `currentProjectId`: Supabase project ID
 
 **Key Methods**:
 - `setCurrentModel(path)`: Set current model
 - `commitModelChanges(message, modelData)`: Create regular commit
 - `commitWithAI(message)`: Create AI-powered commit
 - `restoreToCommit(commitId)`: Restore model to specific commit
+- `pullFromCommit(commitId)`: Pull commit to local file (updates disk)
 - `createInitialCommit(modelData)`: Create first commit
 - `markUnsavedChanges()` / `clearUnsavedChanges()`: Track changes
+- `clearCurrentModel()`: Clear model and reset gallery mode
+- `toggleGalleryMode()`: Enter/exit gallery mode
+- `toggleCommitSelection(commitId)`: Select/deselect commit for gallery (max 4)
+- `clearSelectedCommits()`: Clear all selections
+- `pullFromCloud()`: Pull commits from cloud storage
+- `toggleStarCommit(commitId)`: Star/unstar a commit
 
 **Integration Points**:
 - Listens to file changes to mark unsaved changes
+- Listens to project-closed events to reset gallery mode
 - Uses callbacks to ModelContext for restoration
 - Uses callback to execute AI commands (set by component)
+- Integrates with Supabase for cloud commits
+- Integrates with AWS S3 for file storage
+
+### AuthContext
+
+**Purpose**: Manages authentication and payment plan state
+
+**Key State**:
+- `user`: Supabase user object
+- `session`: Supabase session
+- `isLoading`: Loading state
+- `paymentPlan`: Current payment plan ('student' | 'enterprise' | null)
+- `hasVerifiedPlan`: Whether user has active subscription
+
+**Key Methods**:
+- `signUp(email, password)`: Create new account
+- `signIn(email, password)`: Sign in
+- `signOut()`: Sign out
+- `resetPassword(email)`: Send password reset email
+- `refreshPaymentStatus()`: Reload payment plan from backend API
+
+**Integration Points**:
+- Loads payment status from backend API on login
+- Payment status checked before cloud pull operations
+- Dashboard uses AuthContext to check current plan
 
 ### DesktopAPI Service
 
@@ -431,7 +493,7 @@
 - Project: `openProjectDialog()`, `getCurrentProject()`, `closeProject()`
 - Git: `gitInit()`, `gitStatus()`, `gitCommit()`, `gitLog()`, `gitCheckout()`, `gitPush()`, `gitPull()`
 - File Watching: `startFileWatching()`, `stopFileWatching()`, `setCurrentFile()`
-- File Reading: `readFileBuffer(filePath)`
+- File Reading: `readFileBuffer(filePath)`, `writeFileBuffer(filePath, buffer)`
 - Events: `onProjectOpened()`, `onProjectClosed()`, `onFileChanged()`
 
 **Pattern**: All methods check `isElectron` and return early if not in Electron
@@ -551,6 +613,29 @@
 7. VersionControlContext.setCurrentCommitId()
 ```
 
+### Gallery Mode Flow
+
+```
+1. User clicks "Gallery" button in VersionControl
+   ↓
+2. VersionControlContext.toggleGalleryMode() sets isGalleryMode = true
+   ↓
+3. User selects commits via checkboxes (max 4)
+   ↓
+4. VersionControlContext.toggleCommitSelection(commitId) updates selectedCommitIds
+   ↓
+5. ModelViewer receives selectedCommits from VersionControlContext
+   ↓
+6. ModelViewer renders grid layout based on count:
+   - 2 commits: 2 columns, 1 row
+   - 3 commits: 2 columns, 2 rows (2 on top, 1 full-width on bottom)
+   - 4 commits: 2 columns, 2 rows (2x2 grid)
+   ↓
+7. Each selected commit renders in its own Canvas with modelData
+   ↓
+8. User exits gallery mode → toggleGalleryMode() clears selections
+```
+
 ### Cloud Storage Architecture (Supabase + S3)
 
 **Overview**: The system uses a hybrid approach combining Supabase (database) and AWS S3 (file storage with versioning).
@@ -578,13 +663,12 @@ S3 Bucket:
   - `status` (text: 'active' | 'canceled' | 'past_due'), `stripe_customer_id` (text), `stripe_subscription_id` (text)
   - `created_at` (timestamptz), `updated_at` (timestamptz)
   - Managed automatically by Stripe webhook handlers in backend
-  - Used by `/api/stripe/payment-status` endpoint to check user's active subscription
 
 **Cloud Commit Flow**:
 ```
 1. User creates a commit with changes
    ↓
-2. Frontend uploads file to S3 via presigned URL
+2. Frontend uploads file to S3 via presigned URL (backend API)
    ↓
 3. S3 returns x-amz-version-id header
    ↓
@@ -601,7 +685,7 @@ S3 Bucket:
    ↓
 2. Frontend fetches commit from Supabase (includes s3_version_id)
    ↓
-3. Frontend requests presigned download URL for specific version
+3. Frontend requests presigned download URL for specific version (backend API)
    ↓
 4. Backend generates presigned URL with VersionId parameter
    ↓
@@ -620,10 +704,6 @@ S3 Bucket:
 - `project-opened`: `{ filePath, fileName }`
 - `project-closed`: `{}`
 - `file-changed`: `{ eventType, filename, filePath }`
-- `show-save-version-dialog`: `{}`
-- `show-version-history`: `{}`
-- `simulate-model-changes`: `{}`
-- `export-model`: `{}`
 - `git-operation-complete`: `{ operation }`
 
 **Renderer → Main (Invokes)**:
@@ -641,6 +721,27 @@ S3 Bucket:
 - `stop-file-watching`: `() => Promise<void>`
 - `set-current-file`: `(filePath: string) => Promise<void>`
 - `read-file-buffer`: `(filePath: string) => Promise<ArrayBuffer>`
+- `write-file-buffer`: `(filePath: string, buffer: ArrayBuffer) => Promise<void>`
+
+### Backend API Endpoints
+
+**AWS S3 Operations** (all require auth):
+- `GET /api/aws/presigned-upload?key=...` - Get presigned URL for S3 upload
+- `GET /api/aws/presigned-download?key=...&versionId=...` - Get presigned URL for S3 download with version
+- `GET /api/aws/list-versions?key=...` - List S3 file versions
+- `DELETE /api/aws/delete-version?key=...&versionId=...` - Delete S3 file version
+
+**Stripe Payment Operations**:
+- `POST /api/stripe/create-checkout-session` - Create Stripe Checkout Session (requires auth)
+  - Body: `{ lookup_key?: string, price_id?: string }`
+  - Returns: `{ sessionId: string, url: string }`
+- `POST /api/stripe/webhook` - Stripe webhook handler (NO auth, uses signature verification)
+  - Handles: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
+- `GET /api/stripe/payment-status` - Get user's payment/subscription status (requires auth)
+  - Returns: `{ hasActivePlan: boolean, plan: 'student' | 'enterprise' | null, status: string }`
+
+**Health Check**:
+- `GET /health` - Health check (no auth required)
 
 ### Type Definitions
 
@@ -668,24 +769,18 @@ interface GitStatus {
 }
 ```
 
-**GitCommit**:
-```typescript
-interface GitCommit {
-  hash: string;
-  message: string;
-  author: string;
-  date: string;
-  files?: string[];
-}
-```
-
 **ModelCommit** (VersionControlContext):
 ```typescript
 interface ModelCommit {
   id: string;
   message: string;
   timestamp: number;
-  modelData?: LoadedModel; // Stores full model state
+  modelData?: LoadedModel; // Stores full model state for UI
+  fileBuffer?: ArrayBuffer; // Stores exact .3dm file for restoration
+  s3VersionId?: string; // S3 version ID for cloud commits
+  supabaseCommitId?: string; // Supabase commit ID
+  parentCommitId?: string; // Parent commit ID for cloud commits
+  starred?: boolean; // Whether this commit is starred/favorited
 }
 ```
 
@@ -694,7 +789,7 @@ interface ModelCommit {
 interface LoadedModel {
   objects: THREE.Object3D[];
   metadata: Rhino3dmMetadata;
-  stats?: SceneStats; // Added for version control
+  stats?: SceneStats; // curves, surfaces, polysurfaces
 }
 ```
 
@@ -706,45 +801,6 @@ type SceneCommand =
   | { action: 'color', target: string, color: string }
   | { action: 'delete', target: string }
   | { action: 'clear' };
-```
-
-**Supabase Types**:
-```typescript
-interface Project {
-  id: string;
-  name: string;
-  s3_key: string;
-  owner_id: string;
-  created_at: string;
-}
-
-interface Commit {
-  id: string;
-  project_id: string;
-  parent_commit_id: string | null;
-  message: string | null;
-  author_id: string;
-  s3_version_id: string;
-  created_at: string;
-}
-
-interface Branch {
-  id: string;
-  project_id: string;
-  name: string;
-  head_commit_id: string | null;
-}
-
-interface Subscription {
-  id: string;
-  user_id: string;
-  plan: 'student' | 'enterprise';
-  status: 'active' | 'canceled' | 'past_due';
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
 ```
 
 ---
@@ -761,8 +817,8 @@ interface Subscription {
 ### Component Guidelines
 
 1. **Use Shadcn UI components** when available (check `src/components/ui/`)
-2. **Use Shadcn Forms** for user input (https://ui.shadcn.com/docs/components/form)
-3. **Context for global state**: ModelContext, VersionControlContext
+2. **Use Shadcn Forms** for user input
+3. **Context for global state**: ModelContext, VersionControlContext, AuthContext
 4. **Local state for UI**: useState for component-specific state
 5. **Custom hooks**: Extract reusable logic
 
@@ -770,8 +826,9 @@ interface Subscription {
 
 1. **Model State**: Managed in ModelContext
 2. **Version Control State**: Managed in VersionControlContext
-3. **Server State**: Use TanStack Query (currently minimal usage)
-4. **UI State**: Local useState in components
+3. **Auth State**: Managed in AuthContext
+4. **Server State**: Use TanStack Query (currently minimal usage)
+5. **UI State**: Local useState in components
 
 ### Error Handling
 
@@ -791,7 +848,7 @@ interface Subscription {
 
 - **Repository location**: Same directory as .3dm file
 - **Initialization**: Creates .gitignore automatically
-- **Commits**: Store full model state in ModelCommit.modelData
+- **Commits**: Store full model state in ModelCommit.modelData and fileBuffer
 - **Restoration**: Restores model state from commit data
 
 ### Authentication (Supabase)
@@ -801,9 +858,6 @@ interface Subscription {
 - **Components**: 
   - `AuthDialog`: Login/Signup dialog with tabs
   - `UserMenu`: Dropdown menu accessible by clicking user email in TitleBar
-    - Shows user email as clickable button
-    - Dropdown menu contains Dashboard and Sign Out options
-    - Uses DropdownMenu component from Shadcn UI
 - **Session**: Auto-refreshes tokens, persists across app restarts
 - **Password Reset**: Email-based reset flow
 
@@ -812,52 +866,33 @@ interface Subscription {
 - **Plans**: Student and Enterprise subscription plans via Stripe
 - **Payment Provider**: Stripe subscriptions (recurring billing)
 - **Storage**: Payment plan stored in Supabase `subscriptions` table
-  - Table schema: `user_id`, `plan` (student/enterprise), `status` (active/canceled/past_due), `stripe_customer_id`, `stripe_subscription_id`, `created_at`, `updated_at`
   - Managed via Stripe webhooks (not manual updates)
 - **Backend API**: Node.js/Express server handles Stripe integration
   - **Local Development**: `http://localhost:3000`
-  - **Production**: Deploy to AWS Elastic Beanstalk, Lambda, or VPS
   - **Stripe Webhook Endpoint**: `POST /api/stripe/webhook`
     - Local: Use Stripe CLI: `stripe listen --forward-to localhost:3000/api/stripe/webhook`
-    - Production: `https://your-backend-domain.com/api/stripe/webhook`
-    - Requires `STRIPE_WEBHOOK_SECRET` in backend `.env`
 - **Stripe Checkout Flow**:
   1. User clicks plan in Dashboard
-  2. Frontend calls `POST /api/stripe/create-checkout-session` with `lookup_key` or `price_id`
+  2. Frontend calls `POST /api/stripe/create-checkout-session`
   3. Backend creates Stripe Checkout Session
   4. User redirected to Stripe Checkout page
   5. After payment, redirected back to Dashboard with `success=true`
   6. Frontend calls `refreshPaymentStatus()` to update plan status
-- **Webhook Events Handled**:
-  - `customer.subscription.created` - Creates subscription record in Supabase
-  - `customer.subscription.updated` - Updates subscription status (active/past_due/canceled)
-  - `customer.subscription.deleted` - Marks subscription as canceled
 - **Payment Status API**: `GET /api/stripe/payment-status`
   - Returns: `{ hasActivePlan: boolean, plan: 'student' | 'enterprise' | null, status: string }`
   - Called by AuthContext on login and when `refreshPaymentStatus()` is invoked
 - **Access Control**: Without an active subscription, users can make commits but cannot pull from cloud storage
 - **Dashboard**: Users can select their plan via the Dashboard page (`/dashboard`)
-  - Accessible by clicking user email in TitleBar → Dashboard option
-  - Uses `InteractivePricingCard` component for plan display
-  - Integrates with Stripe Checkout for subscription creation
-  - Handles Stripe redirect callbacks (success/cancel)
 - **Verification**: `hasVerifiedPlan` property in AuthContext indicates if user has an active subscription
 - **Restrictions**: 
   - Commits: Always allowed (local operations)
   - Pull from cloud storage: Requires active subscription (`status: 'active'`)
-  - Other features: All unlocked with active subscription
 - **Hook**: `useCloudPull()` hook provides validated pull operations with error handling
-- **Environment Variables**:
-  - Frontend: `VITE_BACKEND_URL` (defaults to `http://localhost:3000`)
-  - Backend: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 
 ### Backend API Server
 
 - **Technology**: Node.js/Express server (`backend/server.js`)
 - **Port**: 3000 (configurable via `PORT` env variable)
-- **Base URL**:
-  - **Local Development**: `http://localhost:3000`
-  - **Production**: Deploy to AWS Elastic Beanstalk, Lambda, or VPS (URL TBD)
 - **Authentication**: All endpoints (except `/health` and `/api/stripe/webhook`) require Supabase JWT token in `Authorization: Bearer <token>` header
 - **Security**: 
   - JWT token verification via Supabase
@@ -865,32 +900,11 @@ interface Subscription {
   - Rate limiting (100 requests per 15 minutes per IP)
   - CORS protection
   - Stripe webhook signature verification
-- **AWS S3 Endpoints**:
-  - `GET /api/aws/presigned-upload` - Get presigned URL for S3 upload (requires auth)
-  - `GET /api/aws/presigned-download` - Get presigned URL for S3 download with version (requires auth)
-  - `GET /api/aws/list-versions` - List S3 file versions (requires auth)
-  - `DELETE /api/aws/delete-version` - Delete S3 file version (requires auth)
-- **Stripe Payment Endpoints**:
-  - `POST /api/stripe/create-checkout-session` - Create Stripe Checkout Session (requires auth)
-    - Body: `{ lookup_key?: string, price_id?: string }`
-    - Returns: `{ sessionId: string, url: string }`
-    - Creates subscription checkout session with user metadata
-  - `POST /api/stripe/webhook` - Stripe webhook handler (NO auth, uses signature verification)
-    - Handles: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
-    - Updates Supabase `subscriptions` table based on Stripe events
-    - Uses raw body parser for signature verification
-  - `GET /api/stripe/payment-status` - Get user's payment/subscription status (requires auth)
-    - Returns: `{ hasActivePlan: boolean, plan: 'student' | 'enterprise' | null, status: string }`
-    - Queries Supabase `subscriptions` table for active subscription
-- **Health Check**:
-  - `GET /health` - Health check (no auth required)
 - **Environment Variables**: 
   - AWS: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_NAME`
   - Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
   - Stripe: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
   - Server: `PORT`, `FRONTEND_URL`
-  - See `backend/README.md` for full list
-- **Deployment**: See `AWS_SETUP.md` and `BACKEND_SETUP_COMPLETE.md` for deployment options
 
 ### Cloud Storage (Supabase + AWS S3)
 
@@ -901,8 +915,7 @@ interface Subscription {
 - **Version Tracking**: Each commit stores `s3_version_id` pointing to S3 version
 - **Delta Commits**: Only changed files get new S3 versions
 - **Presigned URLs**: Used for secure upload/download without exposing AWS credentials
-- **Current Status**: Backend API fully integrated, frontend uses `VITE_BACKEND_URL` or `VITE_AWS_API_URL`
-- **Access Control**: Pull operations require active Stripe subscription (checked via `/api/stripe/payment-status`)
+- **Access Control**: Pull operations require active Stripe subscription
 
 ### AI Integration
 
@@ -917,6 +930,19 @@ interface Subscription {
 - **Object IDs**: Format: `gen_{timestamp}_{random}`
 - **Serialization**: Full state saved in commits
 - **Restoration**: Recreates objects from serialized data
+
+### Gallery Mode
+
+- **Selection Limit**: Maximum of 4 commits can be selected
+- **Layouts**:
+  - 2 commits: Side by side (2 columns, 1 row)
+  - 3 commits: 2 on top, 1 full-width on bottom (2 columns, 2 rows)
+  - 4 commits: 2x2 grid (2 columns, 2 rows)
+- **State Management**: 
+  - `isGalleryMode`: Boolean flag in VersionControlContext
+  - `selectedCommitIds`: Set of selected commit IDs (max 4)
+- **Reset Behavior**: Gallery mode resets when project is closed
+- **UI**: Checkboxes in VersionControl component for selection, disabled when limit reached
 
 ---
 
@@ -941,10 +967,11 @@ interface Subscription {
 **Regular Commit**:
 1. User enters commit message
 2. VersionControlContext.commitModelChanges()
-3. Creates ModelCommit with current modelData
-4. Adds to commits array
-5. Sets as current commit
-6. Clears unsaved changes flag
+3. Creates ModelCommit with current modelData and fileBuffer
+4. If cloud enabled, uploads to S3 and creates Supabase commit
+5. Adds to commits array
+6. Sets as current commit
+7. Clears unsaved changes flag
 
 **AI Commit**:
 1. User enters commit message
@@ -961,13 +988,33 @@ interface Subscription {
 
 1. User clicks "Restore" on commit in history
 2. VersionControlContext.restoreToCommit(commitId)
-3. Retrieves ModelCommit from array
+3. Retrieves ModelCommit from array (or downloads from S3 if cloud)
 4. Calls onModelRestore callback with modelData
 5. ModelContext restores scene:
    - If modelData.objects: setLoadedModel()
    - If serialized objects: restoreScene()
 6. Scene updates to show restored state
 7. VersionControlContext updates currentCommitId
+
+### Pulling from Commit (Updates File on Disk)
+
+1. User clicks "Pull" button on commit
+2. VersionControlContext.pullFromCommit(commitId)
+3. Retrieves fileBuffer from commit (or downloads from S3)
+4. Writes fileBuffer to disk via desktopAPI.writeFileBuffer()
+5. File is updated on disk
+6. Rhino detects change and auto-reloads
+7. ModelContext reloads model from disk
+
+### Gallery Mode Workflow
+
+1. User clicks "Gallery" button in VersionControl
+2. VersionControlContext.toggleGalleryMode() sets isGalleryMode = true
+3. User selects commits via checkboxes (max 4, disabled when limit reached)
+4. ModelViewer detects selectedCommits and renders grid layout
+5. Each selected commit renders in its own Canvas with modelData
+6. User can interact with each viewport independently
+7. User exits gallery mode → toggleGalleryMode() clears selections and resets state
 
 ### File Change Detection
 
@@ -981,15 +1028,6 @@ interface Subscription {
    - Updates loadedModel state
 5. VersionControlContext.onFileChanged handler:
    - Marks hasUnsavedChanges = true
-
-### Exporting Model
-
-1. User triggers export (menu or button)
-2. ModelContext.exportScene(filename)
-3. Traverses Three.js scene
-4. Converts meshes to Rhino format
-5. Creates .3dm file
-6. Triggers browser download
 
 ### Stripe Payment Flow
 
@@ -1021,24 +1059,39 @@ interface Subscription {
 13. User now has access to all features
 ```
 
-### Subscription Status Updates
+---
 
-```
-1. Stripe subscription status changes (payment failed, canceled, etc.)
-   ↓
-2. Stripe sends webhook: customer.subscription.updated or customer.subscription.deleted
-   ↓
-3. Backend webhook handler updates Supabase subscriptions table
-   ↓
-4. User's next API call to /api/stripe/payment-status reflects new status
-   ↓
-5. AuthContext.refreshPaymentStatus() can be called to update immediately
-```
+## Recent Updates & Features
+
+### Gallery Mode (Latest)
+- **Selection Limit**: Maximum 4 commits can be selected for comparison
+- **Adaptive Layouts**: 
+  - 2 models: Side by side
+  - 3 models: 2 on top, 1 full-width on bottom
+  - 4 models: 2x2 grid
+- **State Management**: Proper reset when project is closed
+- **UI**: Checkboxes with disabled state when limit reached
+
+### Cloud Storage Integration
+- **Supabase**: Full database integration for projects and commits
+- **AWS S3**: File storage with versioning via backend API
+- **Payment Gating**: Cloud pull requires active subscription
+
+### Payment System
+- **Stripe Integration**: Full subscription management
+- **Webhook Handling**: Automatic subscription status updates
+- **Dashboard**: User-friendly plan selection interface
+
+### Bug Fixes
+- **Gallery Mode Reset**: Fixed bug where gallery mode background persisted after closing project
+- **Grid Layout**: Fixed 3 and 4 model layouts to display correctly
+- **Selection Limit**: Proper enforcement of 4-commit maximum
 
 ---
 
 ## Environment Variables
 
+### Frontend
 - `VITE_GEMINI_API_KEY`: Google Gemini API key (required for AI features)
 - `VITE_SUPABASE_URL`: Supabase project URL (required for auth and database)
 - `VITE_SUPABASE_ANON_KEY`: Supabase anonymous key (required for auth and database)
@@ -1046,38 +1099,17 @@ interface Subscription {
   - Used for both AWS S3 operations and Stripe payment operations
   - Can also use `VITE_AWS_API_URL` for backward compatibility
 
----
-
-## Build & Development
-
-### Development
-
-```bash
-# Start Vite dev server
-npm run dev
-
-# Build Electron TypeScript
-npm run build:electron
-
-# Watch Electron changes
-npm run watch:electron
-
-# Run Electron app (dev mode)
-npm run electron:dev
-```
-
-### Production Build
-
-```bash
-# Build React app
-npm run build
-
-# Build Electron
-npm run build:electron
-
-# Package for distribution
-npm run electron:dist
-```
+### Backend
+- `AWS_ACCESS_KEY_ID`: AWS access key
+- `AWS_SECRET_ACCESS_KEY`: AWS secret key
+- `AWS_REGION`: AWS region (e.g., us-east-1)
+- `S3_BUCKET_NAME`: S3 bucket name
+- `SUPABASE_URL`: Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key
+- `STRIPE_SECRET_KEY`: Stripe secret key
+- `STRIPE_WEBHOOK_SECRET`: Stripe webhook secret
+- `PORT`: Server port (default: 3000)
+- `FRONTEND_URL`: Frontend URL for CORS
 
 ---
 
@@ -1095,7 +1127,6 @@ npm run electron:dist
    - Check `hasVerifiedPlan` before allowing pull operations, use `useCloudPull()` hook
    - Payment plans managed via Stripe subscriptions stored in Supabase `subscriptions` table
    - Use `refreshPaymentStatus()` in AuthContext to reload payment status from backend
-   - Dashboard integrates with Stripe Checkout for subscription creation
 8. **UI components**: Prefer Shadcn UI from `src/components/ui/`
 9. **Forms**: Use Shadcn Forms pattern
 10. **State management**: Use contexts for global state, useState for local
@@ -1104,6 +1135,10 @@ npm run electron:dist
     - Always wrap pages with both providers if using ModelProvider
     - Dashboard page requires both providers for TitleBar to work correctly
 12. **UserMenu**: Clicking user email in TitleBar opens dropdown menu with Dashboard and Sign Out options
+13. **Gallery Mode**: 
+    - Maximum 4 commits can be selected
+    - Reset gallery mode state when closing project
+    - Use explicit grid positioning for 4-commit layout
 
 ### Common Patterns
 
@@ -1112,6 +1147,7 @@ npm run electron:dist
 - **Type safety**: Use TypeScript interfaces, avoid `any`
 - **Serialization**: ModelContext provides serializeScene/restoreScene
 - **Event cleanup**: Remove IPC listeners in useEffect cleanup
+- **Gallery mode**: Check `isGalleryMode` and `selectedCommitIds.size` before rendering gallery
 
 ### Testing File Watching
 
@@ -1132,4 +1168,3 @@ npm run electron:dist
 ---
 
 **End of PRD Context Document**
-
