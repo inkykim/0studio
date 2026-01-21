@@ -12,6 +12,18 @@ interface ModelCommit {
   modelData?: LoadedModel; // Store the actual model data (for display/restore in UI)
   fileBuffer?: ArrayBuffer; // Store the exact .3dm file buffer (for exact file restoration)
   starred?: boolean; // Whether this commit is starred/favorited
+  parentCommitId?: string | null; // Parent commit ID for branching (null for root)
+  branchId: string; // Branch this commit belongs to
+}
+
+interface Branch {
+  id: string;
+  name: string;
+  headCommitId: string; // Latest commit on this branch
+  color: string; // Color for visualization
+  parentBranchId?: string; // Parent branch (for branch-off-branch scenarios)
+  originCommitId?: string; // Commit this branch was created from
+  isMain: boolean; // Whether this is the main/master branch
 }
 
 interface VersionControlContextType {
@@ -23,9 +35,14 @@ interface VersionControlContextType {
   hasUnsavedChanges: boolean;
   isProcessingAICommit: boolean;
   
+  // Branching
+  branches: Branch[];
+  activeBranchId: string | null;
+  pulledCommitId: string | null; // The commit that was last pulled/downloaded (for highlighting)
+  
   // Actions
   setCurrentModel: (path: string) => void;
-  commitModelChanges: (message: string, currentModelData?: LoadedModel) => Promise<void>;
+  commitModelChanges: (message: string, currentModelData?: LoadedModel, customBranchName?: string) => Promise<void>;
   commitWithAI: (message: string) => Promise<{ success: boolean; error?: string }>;
   createInitialCommit: (modelData: LoadedModel, fileBuffer?: ArrayBuffer, filePath?: string) => void | Promise<void>;
   restoreToCommit: (commitId: string) => Promise<boolean>;
@@ -35,6 +52,12 @@ interface VersionControlContextType {
   clearCurrentModel: () => void;
   toggleStarCommit: (commitId: string) => void; // Toggle star status of a commit
   getStarredCommits: () => ModelCommit[]; // Get all starred commits
+  
+  // Branching actions
+  switchBranch: (branchId: string) => void;
+  keepBranch: (branchId: string) => void; // Mark a branch as the main/kept branch
+  getBranchCommits: (branchId: string) => ModelCommit[];
+  getCommitVersionLabel: (commit: ModelCommit) => string; // Get version label like v3a, v3b
   
   // Gallery mode
   isGalleryMode: boolean;
@@ -58,6 +81,18 @@ interface VersionControlProviderProps {
   children: ReactNode;
 }
 
+// Branch colors for visualization
+const BRANCH_COLORS = [
+  '#ef4444', // red (main)
+  '#22c55e', // green
+  '#3b82f6', // blue
+  '#f59e0b', // amber
+  '#8b5cf6', // purple
+  '#ec4899', // pink
+  '#14b8a6', // teal
+  '#f97316', // orange
+];
+
 export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ children }) => {
   const [currentModel, setCurrentModelState] = useState<string | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
@@ -69,6 +104,11 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [onAICommit, setOnAICommit] = useState<((message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>) | undefined>(undefined);
   const [isGalleryMode, setIsGalleryMode] = useState(false);
   const [selectedCommitIds, setSelectedCommitIds] = useState<Set<string>>(new Set());
+  
+  // Branching state
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
+  const [pulledCommitId, setPulledCommitId] = useState<string | null>(null);
 
   const setModelRestoreCallback = useCallback((callback: (modelData: LoadedModel) => void) => {
     setOnModelRestore(() => callback);
@@ -86,7 +126,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   }, []);
 
   // Helper function to save commits to localStorage
-  const saveCommitsToStorage = useCallback((filePath: string, commitsToSave: ModelCommit[]) => {
+  const saveCommitsToStorage = useCallback((filePath: string, commitsToSave: ModelCommit[], branchesToSave?: Branch[]) => {
     try {
       const storageKey = getStorageKey(filePath);
       
@@ -98,6 +138,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         message: commit.message,
         timestamp: commit.timestamp,
         starred: commit.starred,
+        parentCommitId: commit.parentCommitId,
+        branchId: commit.branchId,
         // Don't store modelData or fileBuffer in localStorage (too large)
         // We'll store fileBuffer in IndexedDB separately if needed
         hasFileBuffer: !!commit.fileBuffer,
@@ -105,6 +147,13 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }));
 
       localStorage.setItem(storageKey, JSON.stringify(serializableCommits));
+      
+      // Save branches separately
+      if (branchesToSave) {
+        const branchStorageKey = `vc_branches_${filePath}`;
+        localStorage.setItem(branchStorageKey, JSON.stringify(branchesToSave));
+      }
+      
       console.log(`Saved ${commitsToSave.length} commits to localStorage for: ${filePath}`);
     } catch (error) {
       console.error('Failed to save commits to localStorage:', error);
@@ -116,10 +165,18 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   }, [getStorageKey]);
 
   // Helper function to load commits from localStorage
-  const loadCommitsFromStorage = useCallback(async (filePath: string): Promise<ModelCommit[]> => {
+  const loadCommitsFromStorage = useCallback(async (filePath: string): Promise<{ commits: ModelCommit[], branches: Branch[] }> => {
     try {
       const storageKey = getStorageKey(filePath);
       const stored = localStorage.getItem(storageKey);
+      
+      // Load branches
+      const branchStorageKey = `vc_branches_${filePath}`;
+      const storedBranches = localStorage.getItem(branchStorageKey);
+      let loadedBranches: Branch[] = [];
+      if (storedBranches) {
+        loadedBranches = JSON.parse(storedBranches);
+      }
       
       if (stored) {
         const serializableCommits = JSON.parse(stored);
@@ -131,6 +188,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
               message: c.message,
               timestamp: c.timestamp,
               starred: c.starred,
+              parentCommitId: c.parentCommitId,
+              branchId: c.branchId || 'main', // Default to main for backwards compatibility
             };
             
             // Try to load fileBuffer from IndexedDB if it was stored
@@ -145,13 +204,13 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           })
         );
         
-        console.log(`Loaded ${commits.length} commits from localStorage for: ${filePath}`);
-        return commits;
+        console.log(`Loaded ${commits.length} commits and ${loadedBranches.length} branches from localStorage for: ${filePath}`);
+        return { commits, branches: loadedBranches };
       }
     } catch (error) {
       console.error('Failed to load commits from localStorage:', error);
     }
-    return [];
+    return { commits: [], branches: [] };
   }, [getStorageKey]);
 
   const setCurrentModel = useCallback((path: string) => {
@@ -164,9 +223,18 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     // Clear unsaved changes only when switching to a different model
     console.log('Model switched, clearing unsaved changes for new model:', path);
     setHasUnsavedChanges(false);
+    setPulledCommitId(null);
 
     // Load persisted commits from localStorage (async)
-    loadCommitsFromStorage(path).then(persistedCommits => {
+    loadCommitsFromStorage(path).then(({ commits: persistedCommits, branches: persistedBranches }) => {
+      // Load branches
+      if (persistedBranches.length > 0) {
+        setBranches(persistedBranches);
+        // Set active branch to main or first branch
+        const mainBranch = persistedBranches.find(b => b.isMain);
+        setActiveBranchId(mainBranch?.id || persistedBranches[0]?.id || null);
+      }
+      
       if (persistedCommits.length > 0) {
         console.log(`Found ${persistedCommits.length} persisted commits for file`);
         // Only update if we don't already have commits (to avoid overwriting initial commit)
@@ -212,6 +280,23 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       return;
     }
 
+    // Create main branch if it doesn't exist
+    const mainBranchId = 'main';
+    setBranches(prevBranches => {
+      if (prevBranches.length === 0) {
+        const mainBranch: Branch = {
+          id: mainBranchId,
+          name: 'main',
+          headCommitId: '', // Will be updated after commit
+          color: BRANCH_COLORS[0],
+          isMain: true,
+        };
+        return [mainBranch];
+      }
+      return prevBranches;
+    });
+    setActiveBranchId(mainBranchId);
+
     setCommits(prevCommits => {
       if (prevCommits.length === 0) {
         // Generate a unique commit ID with timestamp and random component
@@ -223,13 +308,22 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           timestamp: Date.now(),
           modelData: modelData,
           fileBuffer: fileBuffer, // Store file buffer if provided
+          parentCommitId: null, // Root commit has no parent
+          branchId: mainBranchId,
         };
         setCurrentCommitId(initialCommit.id);
         console.log("Created initial commit:", initialCommit.id, fileBuffer ? `with ${fileBuffer.byteLength} byte file buffer` : 'without file buffer');
         const updated = [initialCommit];
         
-        // Save to localStorage
-        saveCommitsToStorage(targetPath, updated);
+        // Update branch head
+        setBranches(prevBranches => {
+          const updatedBranches = prevBranches.map(b => 
+            b.id === mainBranchId ? { ...b, headCommitId: commitId } : b
+          );
+          // Save both commits and branches
+          saveCommitsToStorage(targetPath, updated, updatedBranches);
+          return updatedBranches;
+        });
         
         // Save file to 0studio folder (file system storage) - await this properly
         if (fileBuffer && desktopAPI.isDesktop) {
@@ -277,7 +371,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     };
   }, [currentModel]); // Re-setup when current model changes
 
-  const commitModelChanges = useCallback(async (message: string, currentModelData?: LoadedModel): Promise<void> => {
+  const commitModelChanges = useCallback(async (message: string, currentModelData?: LoadedModel, customBranchName?: string): Promise<void> => {
     if (!currentModel) {
       throw new Error("No model is currently open");
     }
@@ -296,8 +390,43 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         }
       }
 
-      // Create local commit
-      // Store both fileBuffer (exact file) and modelData (for UI display/restore)
+      // Determine if we need to create a new branch
+      // If currentCommitId is not the head of the active branch, we're branching
+      let targetBranchId = activeBranchId || 'main';
+      let parentCommitId = currentCommitId;
+      let newBranch: Branch | null = null;
+      
+      // Check if we're at the head of the current branch
+      const activeBranch = branches.find(b => b.id === activeBranchId);
+      const isAtBranchHead = activeBranch && activeBranch.headCommitId === currentCommitId;
+      
+      // If we pulled to an old commit and are now committing, create a new branch
+      if (pulledCommitId && pulledCommitId !== activeBranch?.headCommitId) {
+        // We're creating a branch from an old commit
+        // Find how many branches already exist from this parent
+        const existingBranchesFromParent = branches.filter(b => b.originCommitId === pulledCommitId);
+        const branchLetter = String.fromCharCode(97 + existingBranchesFromParent.length); // a, b, c, etc.
+        
+        // Generate new branch ID and name
+        const newBranchId = `branch-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const branchName = customBranchName || `v${getCommitNumber(pulledCommitId)}${branchLetter}`;
+        
+        newBranch = {
+          id: newBranchId,
+          name: branchName,
+          headCommitId: '', // Will be updated after commit
+          color: BRANCH_COLORS[branches.length % BRANCH_COLORS.length],
+          parentBranchId: activeBranchId || undefined,
+          originCommitId: pulledCommitId,
+          isMain: false,
+        };
+        
+        targetBranchId = newBranchId;
+        parentCommitId = pulledCommitId;
+        
+        console.log(`Creating new branch "${branchName}" from commit ${pulledCommitId}`);
+      }
+
       // Generate a unique commit ID with timestamp and random component to avoid collisions
       const commitId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const newCommit: ModelCommit = {
@@ -306,13 +435,30 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         timestamp: Date.now(),
         modelData: currentModelData, // Store for UI display and in-memory restore
         fileBuffer: fileBuffer, // Store exact .3dm file buffer for exact file restoration
+        parentCommitId: parentCommitId,
+        branchId: targetBranchId,
       };
+
+      // Update branches
+      let updatedBranches = [...branches];
+      if (newBranch) {
+        newBranch.headCommitId = commitId;
+        updatedBranches.push(newBranch);
+      } else {
+        // Update head of current branch
+        updatedBranches = updatedBranches.map(b => 
+          b.id === targetBranchId ? { ...b, headCommitId: commitId } : b
+        );
+      }
+      
+      setBranches(updatedBranches);
+      setActiveBranchId(targetBranchId);
 
       setCommits(prev => {
         const updated = [newCommit, ...prev];
-        // Save to localStorage
+        // Save to localStorage with branches
         if (currentModel) {
-          saveCommitsToStorage(currentModel, updated);
+          saveCommitsToStorage(currentModel, updated, updatedBranches);
         }
         return updated;
       });
@@ -331,14 +477,29 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       
       setCurrentCommitId(newCommit.id);
       setHasUnsavedChanges(false);
+      setPulledCommitId(null); // Clear pulled commit after successful commit
 
       console.log("Model commit created with file buffer:", newCommit.id, fileBuffer ? `${fileBuffer.byteLength} bytes` : 'no buffer');
-      toast.success("Commit saved successfully");
+      toast.success(newBranch ? `New branch "${newBranch.name}" created` : "Commit saved successfully");
     } catch (error) {
       console.error("Failed to commit model changes:", error);
       throw error;
     }
-  }, [currentModel, currentCommitId, saveCommitsToStorage]);
+  }, [currentModel, currentCommitId, activeBranchId, branches, pulledCommitId, saveCommitsToStorage]);
+  
+  // Helper to get commit number in the timeline
+  const getCommitNumber = useCallback((commitId: string | null): number => {
+    if (!commitId) return 0;
+    const commit = commits.find(c => c.id === commitId);
+    if (!commit) return 0;
+    
+    // Count commits in the same branch up to this commit
+    const branchCommits = commits
+      .filter(c => c.branchId === commit.branchId)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    
+    return branchCommits.findIndex(c => c.id === commitId) + 1;
+  }, [commits]);
 
   // Commit using AI to interpret the message and modify the model
   const commitWithAI = useCallback(async (message: string): Promise<{ success: boolean; error?: string }> => {
@@ -542,7 +703,11 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
 
       setCurrentCommitId(commitId);
+      setPulledCommitId(commitId); // Track which commit was pulled for highlighting
       setHasUnsavedChanges(false);
+      
+      // Switch to the branch of this commit
+      setActiveBranchId(commit.branchId);
       
       toast.success("File updated to exact commit version - Rhino should auto-reload");
       return true;
@@ -570,6 +735,10 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     // Reset gallery mode when closing project
     setIsGalleryMode(false);
     setSelectedCommitIds(new Set());
+    // Reset branching state
+    setBranches([]);
+    setActiveBranchId(null);
+    setPulledCommitId(null);
   }, []);
 
   // Handle project-closed event from Electron
@@ -653,6 +822,112 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setSelectedCommitIds(new Set());
   }, []);
 
+  // Branching functions
+  const switchBranch = useCallback((branchId: string) => {
+    const branch = branches.find(b => b.id === branchId);
+    if (!branch) {
+      console.error('Branch not found:', branchId);
+      return;
+    }
+    
+    setActiveBranchId(branchId);
+    setCurrentCommitId(branch.headCommitId);
+    setPulledCommitId(null);
+    
+    console.log(`Switched to branch: ${branch.name}`);
+  }, [branches]);
+
+  const keepBranch = useCallback((branchId: string) => {
+    if (!currentModel) return;
+    
+    const branchToKeep = branches.find(b => b.id === branchId);
+    if (!branchToKeep) {
+      console.error('Branch not found:', branchId);
+      return;
+    }
+    
+    // Mark this branch as main and demote others
+    const updatedBranches = branches.map(b => ({
+      ...b,
+      isMain: b.id === branchId,
+    }));
+    
+    setBranches(updatedBranches);
+    setActiveBranchId(branchId);
+    
+    // Save to storage
+    saveCommitsToStorage(currentModel, commits, updatedBranches);
+    
+    toast.success(`Branch "${branchToKeep.name}" is now the main branch`);
+    console.log(`Kept branch: ${branchToKeep.name}`);
+  }, [branches, commits, currentModel, saveCommitsToStorage]);
+
+  const getBranchCommits = useCallback((branchId: string): ModelCommit[] => {
+    return commits.filter(c => c.branchId === branchId).sort((a, b) => b.timestamp - a.timestamp);
+  }, [commits]);
+
+  const getCommitVersionLabel = useCallback((commit: ModelCommit): string => {
+    // Find the branch for this commit
+    const branch = branches.find(b => b.id === commit.branchId);
+    
+    // Get all commits on main branch sorted by timestamp
+    const mainBranch = branches.find(b => b.isMain);
+    const mainCommits = commits
+      .filter(c => c.branchId === mainBranch?.id)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    
+    if (branch?.isMain) {
+      // Main branch: just use version number v1, v2, v3...
+      const idx = mainCommits.findIndex(c => c.id === commit.id);
+      return `v${idx + 1}`;
+    }
+    
+    // For non-main branches, find the origin point
+    if (branch?.originCommitId) {
+      const originCommit = commits.find(c => c.id === branch.originCommitId);
+      if (originCommit) {
+        // Find the version number of the origin commit
+        const originBranch = branches.find(b => b.id === originCommit.branchId);
+        const originBranchCommits = commits
+          .filter(c => c.branchId === originBranch?.id)
+          .sort((a, b) => a.timestamp - b.timestamp);
+        const originIdx = originBranchCommits.findIndex(c => c.id === originCommit.id);
+        const baseVersion = originIdx + 1;
+        
+        // Get all sibling branches from the same origin
+        const siblingBranches = branches
+          .filter(b => b.originCommitId === branch.originCommitId && !b.isMain)
+          .sort((a, b) => {
+            // Sort by creation time (first commit timestamp)
+            const aFirstCommit = commits.filter(c => c.branchId === a.id).sort((x, y) => x.timestamp - y.timestamp)[0];
+            const bFirstCommit = commits.filter(c => c.branchId === b.id).sort((x, y) => x.timestamp - y.timestamp)[0];
+            return (aFirstCommit?.timestamp || 0) - (bFirstCommit?.timestamp || 0);
+          });
+        
+        const branchIndex = siblingBranches.findIndex(b => b.id === branch.id);
+        const branchLetter = String.fromCharCode(97 + branchIndex); // a, b, c...
+        
+        // Get commit index within this branch
+        const branchCommits = commits
+          .filter(c => c.branchId === commit.branchId)
+          .sort((a, b) => a.timestamp - b.timestamp);
+        const commitIdx = branchCommits.findIndex(c => c.id === commit.id);
+        
+        if (commitIdx === 0) {
+          return `v${baseVersion + 1}${branchLetter}`;
+        }
+        return `v${baseVersion + 1 + commitIdx}${branchLetter}`;
+      }
+    }
+    
+    // Fallback
+    const branchCommits = commits
+      .filter(c => c.branchId === commit.branchId)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    const idx = branchCommits.findIndex(c => c.id === commit.id);
+    return `v${idx + 1}`;
+  }, [branches, commits]);
+
   // Load starred commits from localStorage when project/model changes
   useEffect(() => {
     if (!currentModel) return;
@@ -686,6 +961,11 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     currentCommitId,
     hasUnsavedChanges,
     isProcessingAICommit,
+    // Branching
+    branches,
+    activeBranchId,
+    pulledCommitId,
+    // Actions
     setCurrentModel,
     commitModelChanges,
     commitWithAI,
@@ -697,11 +977,18 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     clearCurrentModel,
     toggleStarCommit,
     getStarredCommits,
+    // Branching actions
+    switchBranch,
+    keepBranch,
+    getBranchCommits,
+    getCommitVersionLabel,
+    // Gallery mode
     isGalleryMode,
     selectedCommitIds,
     toggleGalleryMode,
     toggleCommitSelection,
     clearSelectedCommits,
+    // Callbacks
     onModelRestore,
     setModelRestoreCallback,
     onAICommit,
@@ -723,4 +1010,4 @@ export const useVersionControl = (): VersionControlContextType => {
   return context;
 };
 
-export type { ModelCommit };
+export type { ModelCommit, Branch };
