@@ -1,7 +1,7 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2024-12-20  
-**Version:** 1.0.0  
+**Last Updated:** 2026-01-21  
+**Version:** 1.1.0  
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -457,16 +457,18 @@
 - `selectedCommitIds`: Set of commit IDs selected for gallery (max 4)
 - `isCloudEnabled`: Whether cloud sync is enabled
 - `currentProjectId`: Supabase project ID
+- `isLoadingTree`: Whether tree.json is currently being loaded
+- `treeLoadPromise`: Promise that resolves when tree.json loading completes (for race condition prevention)
 
 **Key Methods**:
-- `setCurrentModel(path)`: Set current model
+- `setCurrentModel(path)`: Set current model, loads tree.json and creates treeLoadPromise
 - `commitModelChanges(message, modelData, customBranchName?)`: Create regular commit (auto-branches when committing from non-head)
 - `commitWithAI(message)`: Create AI-powered commit
 - `restoreToCommit(commitId)`: Restore model to specific commit
 - `pullFromCommit(commitId)`: Pull commit to local file (updates disk, sets pulledCommitId)
-- `createInitialCommit(modelData)`: Create first commit and main branch
+- `createInitialCommit(modelData)`: Create first commit and main branch (awaits treeLoadPromise first)
 - `markUnsavedChanges()` / `clearUnsavedChanges()`: Track changes
-- `clearCurrentModel()`: Clear model, reset gallery mode and branches
+- `clearCurrentModel()`: Clear model, reset gallery mode, branches, and tree loading state
 - `toggleGalleryMode()`: Enter/exit gallery mode
 - `toggleCommitSelection(commitId)`: Select/deselect commit for gallery (max 4)
 - `clearSelectedCommits()`: Clear all selections
@@ -722,21 +724,30 @@
 **Persistence Flow**:
 1. **On Project Open**: 
    - `VersionControlContext.setCurrentModel()` loads `tree.json` from `0studio/{filename}/` folder
-   - If `tree.json` exists, parses and loads branches and commits
+   - Creates a `treeLoadPromise` that resolves when loading is complete
+   - If `tree.json` exists and has commits, parses and loads branches, commits, activeBranchId, currentCommitId
    - Validates all commit files exist, warns about missing files
    - Falls back to localStorage if `tree.json` doesn't exist (backwards compatibility)
-2. **On Commit/Branch Change**:
+2. **On Initial Commit Creation**:
+   - `createInitialCommit()` awaits `treeLoadPromise` before proceeding (prevents race conditions)
+   - Uses Promise-based state check to get real current commits count
+   - If commits already exist (loaded from tree.json), skips creating duplicate initial commit
+   - Only creates new initial commit if no commits exist
+3. **On Commit/Branch Change**:
    - Auto-saves `tree.json` via `useEffect` hook whenever branches, commits, activeBranchId, or currentCommitId change
+   - Skips saving while `isLoadingTree` is true (prevents overwriting during load)
    - Saves full commit metadata (id, message, timestamp, parentCommitId, branchId, starred)
    - Saves full branch metadata (id, name, headCommitId, color, isMain, parentBranchId, originCommitId)
-3. **On Project Close**:
+4. **On Project Close**:
    - Saves `tree.json` one final time before clearing state
+   - Resets `treeLoadPromise` and `isLoadingTree` state
    - Handles errors gracefully (logs warnings, doesn't throw)
 
 **Benefits**:
 - **Efficient**: JSON format, only stores metadata (not file data)
 - **Readable**: Pretty-printed with 2-space indentation for debugging
 - **Persistent**: Survives app restarts, stored in local file system
+- **Race-Condition Safe**: Uses Promise-based coordination to prevent duplicate commits on reload
 - **Validated**: Checks for missing commit files and warns in console
 - **Backwards Compatible**: Falls back to localStorage if tree.json doesn't exist
 
@@ -1253,8 +1264,10 @@ type SceneCommand =
 ### Local File Storage & Tree Persistence (Latest)
 - **Local Commit Storage**: Commits stored as `commit-{commitId}.3dm` files in `0studio/{filename}/` folder
 - **Tree.json Persistence**: Branch and commit tree structure persisted to `tree.json` in same folder as commits
-- **Auto-Save**: Tree.json automatically saved on any commit/branch change
-- **Project Open**: Loads tree.json on project open (primary source, falls back to localStorage)
+- **Dynamic File Paths**: File paths are not hardcoded - dynamically constructed from .3dm file path
+- **Auto-Save**: Tree.json automatically saved on any commit/branch change (skips during loading)
+- **Project Open**: Loads tree.json via `treeLoadPromise` (primary source, falls back to localStorage)
+- **Race Condition Prevention**: `createInitialCommit()` awaits `treeLoadPromise` before checking for existing commits, preventing duplicate initial commits when reopening projects
 - **Validation**: Validates commit files exist when loading tree.json, warns about missing files
 - **Error Handling**: Graceful error handling during save/load, doesn't throw on project close
 
@@ -1287,6 +1300,7 @@ type SceneCommand =
 - **Dashboard**: User-friendly plan selection interface
 
 ### Bug Fixes
+- **Tree.json Persistence**: Fixed race condition where `createInitialCommit` could run before tree.json finished loading, causing duplicate commits when reopening projects
 - **Gallery Mode Reset**: Fixed bug where gallery mode background persisted after closing project
 - **Grid Layout**: Fixed 3 and 4 model layouts to display correctly
 - **Selection Limit**: Proper enforcement of 4-commit maximum
@@ -1353,9 +1367,11 @@ type SceneCommand =
 15. **Local File Storage**:
     - Commit files stored in `0studio/{filename}/` folder as `commit-{commitId}.3dm`
     - Tree.json stored in same folder, contains full branch and commit metadata
+    - File paths are NOT hardcoded - dynamically constructed from .3dm file path using `dirname()` and `basename()`
     - Use `desktopAPI.saveCommitFile()`, `readCommitFile()`, `saveTreeFile()`, `loadTreeFile()`
-    - Tree.json auto-saves via useEffect when branches/commits change
-    - Load tree.json on project open, validate commit files exist
+    - Tree.json auto-saves via useEffect when branches/commits change (skips during `isLoadingTree`)
+    - Load tree.json on project open via `treeLoadPromise`, validate commit files exist
+    - `createInitialCommit()` awaits `treeLoadPromise` to prevent race conditions and duplicate commits
     - Save tree.json before project close to ensure persistence
     - Handle errors gracefully (log warnings, don't throw)
 
