@@ -426,7 +426,7 @@
 
 ### VersionControlContext
 
-**Purpose**: Manages version control state and operations
+**Purpose**: Manages version control state, branching, and operations
 
 **Key State**:
 - `currentModel`: Path to current model file
@@ -434,6 +434,9 @@
 - `currentCommitId`: ID of currently active commit
 - `hasUnsavedChanges`: Whether model has uncommitted changes
 - `isProcessingAICommit`: Whether AI commit is in progress
+- `branches`: Array of Branch objects (branching feature)
+- `activeBranchId`: Currently selected branch ID
+- `pulledCommitId`: ID of commit that was last pulled/downloaded (for highlighting)
 - `isGalleryMode`: Whether gallery mode is active
 - `selectedCommitIds`: Set of commit IDs selected for gallery (max 4)
 - `isCloudEnabled`: Whether cloud sync is enabled
@@ -441,22 +444,33 @@
 
 **Key Methods**:
 - `setCurrentModel(path)`: Set current model
-- `commitModelChanges(message, modelData)`: Create regular commit
+- `commitModelChanges(message, modelData, customBranchName?)`: Create regular commit (auto-branches when committing from non-head)
 - `commitWithAI(message)`: Create AI-powered commit
 - `restoreToCommit(commitId)`: Restore model to specific commit
-- `pullFromCommit(commitId)`: Pull commit to local file (updates disk)
-- `createInitialCommit(modelData)`: Create first commit
+- `pullFromCommit(commitId)`: Pull commit to local file (updates disk, sets pulledCommitId)
+- `createInitialCommit(modelData)`: Create first commit and main branch
 - `markUnsavedChanges()` / `clearUnsavedChanges()`: Track changes
-- `clearCurrentModel()`: Clear model and reset gallery mode
+- `clearCurrentModel()`: Clear model, reset gallery mode and branches
 - `toggleGalleryMode()`: Enter/exit gallery mode
 - `toggleCommitSelection(commitId)`: Select/deselect commit for gallery (max 4)
 - `clearSelectedCommits()`: Clear all selections
 - `pullFromCloud()`: Pull commits from cloud storage
 - `toggleStarCommit(commitId)`: Star/unstar a commit
+- `switchBranch(branchId)`: Switch to a different branch
+- `keepBranch(branchId)`: Mark a branch as the main branch
+- `getBranchCommits(branchId)`: Get all commits for a specific branch
+- `getCommitVersionLabel(commit)`: Get version label (v1, v2, v3a, v3b, etc.)
+
+**Branching Logic**:
+- When `pullFromCommit` is called, `pulledCommitId` is set to track the pulled commit
+- When committing with `pulledCommitId` set and it's not the branch head, a new branch is automatically created
+- Branch names follow pattern: v{parentVersion}{letter} (e.g., v2a, v2b, v2c)
+- Each branch has a unique color for visualization
+- Users can switch between branches and mark any branch as "main"
 
 **Integration Points**:
 - Listens to file changes to mark unsaved changes
-- Listens to project-closed events to reset gallery mode
+- Listens to project-closed events to reset gallery mode and branches
 - Uses callbacks to ModelContext for restoration
 - Uses callback to execute AI commands (set by component)
 - Integrates with Supabase for cloud commits
@@ -779,8 +793,22 @@ interface ModelCommit {
   fileBuffer?: ArrayBuffer; // Stores exact .3dm file for restoration
   s3VersionId?: string; // S3 version ID for cloud commits
   supabaseCommitId?: string; // Supabase commit ID
-  parentCommitId?: string; // Parent commit ID for cloud commits
+  parentCommitId?: string | null; // Parent commit ID for branching (null for root)
+  branchId: string; // Branch this commit belongs to
   starred?: boolean; // Whether this commit is starred/favorited
+}
+```
+
+**Branch** (VersionControlContext):
+```typescript
+interface Branch {
+  id: string;
+  name: string;
+  headCommitId: string; // Latest commit on this branch
+  color: string; // Color for visualization (e.g., '#ef4444')
+  parentBranchId?: string; // Parent branch for branch-off-branch scenarios
+  originCommitId?: string; // Commit this branch was created from
+  isMain: boolean; // Whether this is the main/master branch
 }
 ```
 
@@ -1016,6 +1044,51 @@ type SceneCommand =
 6. User can interact with each viewport independently
 7. User exits gallery mode → toggleGalleryMode() clears selections and resets state
 
+### Branching Workflow
+
+```
+1. User has commits v1, v2, v3 on main branch
+   ↓
+2. User clicks Download (pull) on v2
+   ↓
+3. VersionControlContext.pullFromCommit(v2) called
+   - Sets pulledCommitId = v2
+   - v2 commit gets amber "working" highlight in UI
+   - File is written to disk, Rhino reloads
+   ↓
+4. User makes changes in Rhino and saves
+   ↓
+5. hasUnsavedChanges = true, UI shows "Creating new branch from v2"
+   ↓
+6. User enters commit message and clicks "Create Branch & Save"
+   ↓
+7. commitModelChanges() detects pulledCommitId is not branch head
+   - Creates new branch "v2a" with unique color
+   - Creates commit on new branch with parentCommitId = v2
+   - Clears pulledCommitId
+   ↓
+8. UI shows branching tree with main (red) and v2a (green) branches
+   ↓
+9. User can switch branches via dropdown
+   ↓
+10. User clicks "Keep" to set current branch as main
+```
+
+**Branching UI Components**:
+- **BranchingTree**: SVG-based visual tree with colored branch lines
+  - Dashed horizontal lines for branch points
+  - Solid vertical lines for same-branch connections
+  - Nodes colored by branch
+- **Branch Selector**: Dropdown to switch between branches
+- **Keep Button**: Sets current branch as the main branch
+- **Version Labels**: Dynamic labels like v1, v2, v3a, v3b, v4a based on branch
+
+**Version Naming Convention**:
+- Main branch: v1, v2, v3, v4...
+- First branch from v2: v3a (first commit), v4a (second commit)...
+- Second branch from v2: v3b, v4b...
+- Third branch from v2: v3c, v4c...
+
 ### File Change Detection
 
 1. User saves .3dm file in Rhino
@@ -1063,7 +1136,16 @@ type SceneCommand =
 
 ## Recent Updates & Features
 
-### Gallery Mode (Latest)
+### Branching System (Latest)
+- **GitHub-like Branching**: Automatic branch creation when committing from a non-head commit
+- **Visual Branch Tree**: SVG-based tree visualization with colored branch lines
+- **Pulled Commit Highlighting**: Amber highlight and "working" badge for the active pulled commit
+- **Branch Selector**: Dropdown to switch between branches when multiple exist
+- **Keep Branch**: Button to mark any branch as the main/master branch
+- **Dynamic Version Labels**: Automatic labeling (v1, v2, v3a, v3b, v4c, etc.)
+- **Branch Colors**: Each branch gets a unique color from a predefined palette
+
+### Gallery Mode
 - **Selection Limit**: Maximum 4 commits can be selected for comparison
 - **Adaptive Layouts**: 
   - 2 models: Side by side
@@ -1139,6 +1221,13 @@ type SceneCommand =
     - Maximum 4 commits can be selected
     - Reset gallery mode state when closing project
     - Use explicit grid positioning for 4-commit layout
+14. **Branching**:
+    - Branches are created automatically when committing from a non-head commit (pulledCommitId set)
+    - Use `getCommitVersionLabel()` to get proper version labels (v1, v2, v3a, v3b)
+    - Check `pulledCommitId` to determine if user is about to create a new branch
+    - `switchBranch()` changes active branch, `keepBranch()` marks a branch as main
+    - Branch colors are assigned from `BRANCH_COLORS` array in order of creation
+    - Reset branches when closing project via `clearCurrentModel()`
 
 ### Common Patterns
 
