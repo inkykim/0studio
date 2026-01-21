@@ -258,6 +258,14 @@
 - Emits events when files are modified, deleted, or added
 - Handles file stability (waits for write completion)
 
+**`electron/services/file-storage-service.ts`**
+- Manages local file storage for commit versions
+- Creates `0studio/{filename}/` folder structure
+- Stores commit files as `commit-{commitId}.3dm`
+- Stores branch/commit tree in `tree.json` (same folder as commits)
+- Provides: saveCommitFile, readCommitFile, listCommitFiles, saveTreeFile, loadTreeFile, validateCommitFiles
+- Validates commit files exist when loading tree.json
+
 **`electron/services/git-service.ts`**
 - Wraps `simple-git` for Git operations
 - Provides: init, status, commit, log, checkout, push, pull
@@ -290,6 +298,11 @@
 - Manages gallery mode state (selection, toggle)
 - Coordinates with ModelContext via callbacks
 - Handles cloud sync with Supabase and S3
+- **Local Persistence**: Loads/saves `tree.json` from `0studio/{filename}/` folder
+  - Loads on `setCurrentModel()` (primary source, falls back to localStorage)
+  - Auto-saves on any commit/branch change via `useEffect`
+  - Validates commit files exist, warns about missing files
+  - Saves before project close to ensure persistence
 
 **`src/contexts/AuthContext.tsx`**
 - Authentication state management using Supabase Auth
@@ -305,6 +318,8 @@
   - Git operations (init, status, commit, log, checkout, push, pull)
   - File watching (start, stop, set current file)
   - File reading/writing (readFileBuffer, writeFileBuffer)
+  - **Local commit storage**: saveCommitFile, readCommitFile, listCommitFiles, commitFileExists
+  - **Tree persistence**: saveTreeFile, loadTreeFile, validateCommitFiles
 - Event listeners for IPC events
 
 **`src/lib/rhino3dm-service.ts`**
@@ -389,9 +404,10 @@
 - Validates command structure
 
 **`src/lib/commit-storage.ts`**
-- IndexedDB storage for commit file buffers
+- IndexedDB storage for commit file buffers (legacy, used as fallback)
 - Stores large file buffers separately from localStorage
 - Provides: storeFileBuffer, getFileBuffer
+- **Note**: Primary storage is now local file system (`0studio/{filename}/` folder)
 
 ---
 
@@ -650,6 +666,80 @@
 8. User exits gallery mode → toggleGalleryMode() clears selections
 ```
 
+### Local File Storage Architecture
+
+**Overview**: The system stores commit files and metadata locally in a dedicated folder structure alongside the original .3dm file.
+
+**Storage Structure**:
+```
+/path/to/
+├── model.3dm                    # Original working file
+└── 0studio/
+    └── model/                   # Storage folder for this file
+        ├── commit-{id1}.3dm    # Commit file versions
+        ├── commit-{id2}.3dm
+        ├── commit-{id3}.3dm
+        └── tree.json           # Branch and commit tree metadata
+```
+
+**File Storage Service** (`electron/services/file-storage-service.ts`):
+- Creates `0studio/{filename}/` folder in the same directory as the .3dm file
+- Stores each commit as `commit-{commitId}.3dm` in the storage folder
+- Stores branch and commit tree structure in `tree.json` (same folder as commits)
+- Validates commit files exist when loading tree.json
+- Provides methods: `saveCommitFile()`, `readCommitFile()`, `listCommitFiles()`, `saveTreeFile()`, `loadTreeFile()`, `validateCommitFiles()`
+
+**Tree.json Structure**:
+```json
+{
+  "version": "1.0",
+  "activeBranchId": "branch-123",
+  "currentCommitId": "commit-456",
+  "branches": [
+    {
+      "id": "branch-123",
+      "name": "main",
+      "headCommitId": "commit-456",
+      "color": "#ef4444",
+      "isMain": true,
+      "parentBranchId": null,
+      "originCommitId": null
+    }
+  ],
+  "commits": [
+    {
+      "id": "commit-456",
+      "message": "Initial commit",
+      "timestamp": 1234567890,
+      "parentCommitId": null,
+      "branchId": "branch-123",
+      "starred": false
+    }
+  ]
+}
+```
+
+**Persistence Flow**:
+1. **On Project Open**: 
+   - `VersionControlContext.setCurrentModel()` loads `tree.json` from `0studio/{filename}/` folder
+   - If `tree.json` exists, parses and loads branches and commits
+   - Validates all commit files exist, warns about missing files
+   - Falls back to localStorage if `tree.json` doesn't exist (backwards compatibility)
+2. **On Commit/Branch Change**:
+   - Auto-saves `tree.json` via `useEffect` hook whenever branches, commits, activeBranchId, or currentCommitId change
+   - Saves full commit metadata (id, message, timestamp, parentCommitId, branchId, starred)
+   - Saves full branch metadata (id, name, headCommitId, color, isMain, parentBranchId, originCommitId)
+3. **On Project Close**:
+   - Saves `tree.json` one final time before clearing state
+   - Handles errors gracefully (logs warnings, doesn't throw)
+
+**Benefits**:
+- **Efficient**: JSON format, only stores metadata (not file data)
+- **Readable**: Pretty-printed with 2-space indentation for debugging
+- **Persistent**: Survives app restarts, stored in local file system
+- **Validated**: Checks for missing commit files and warns in console
+- **Backwards Compatible**: Falls back to localStorage if tree.json doesn't exist
+
 ### Cloud Storage Architecture (Supabase + S3)
 
 **Overview**: The system uses a hybrid approach combining Supabase (database) and AWS S3 (file storage with versioning).
@@ -872,6 +962,16 @@ type SceneCommand =
 - **Auto-reload**: ModelContext automatically reloads on file change
 - **Unsaved changes**: VersionControlContext tracks when file changes
 
+### Local File Storage
+
+- **Storage location**: `0studio/{filename}/` folder in same directory as .3dm file
+- **Commit files**: Stored as `commit-{commitId}.3dm` in storage folder
+- **Tree metadata**: Stored as `tree.json` in same folder as commit files
+- **Persistence**: Auto-saves tree.json on any commit/branch change
+- **Loading**: Loads tree.json on project open (primary source, falls back to localStorage)
+- **Validation**: Checks for missing commit files and warns in console
+- **File operations**: All via FileStorageService in Electron main process
+
 ### Git Operations
 
 - **Repository location**: Same directory as .3dm file
@@ -988,7 +1088,11 @@ type SceneCommand =
 5. Renderer receives event:
    - ModelContext.importFile() loads file
    - VersionControlContext.setCurrentModel() sets path
-   - VersionControlContext.createInitialCommit() creates first commit
+   - VersionControlContext loads `tree.json` from `0studio/{filename}/` folder:
+     - If exists: Parses and loads branches and commits, validates commit files
+     - If missing: Falls back to localStorage (backwards compatibility)
+   - VersionControlContext.createInitialCommit() creates first commit (if no commits exist)
+   - Tree.json is auto-saved after initial commit
 
 ### Committing Changes
 
@@ -996,10 +1100,12 @@ type SceneCommand =
 1. User enters commit message
 2. VersionControlContext.commitModelChanges()
 3. Creates ModelCommit with current modelData and fileBuffer
-4. If cloud enabled, uploads to S3 and creates Supabase commit
-5. Adds to commits array
-6. Sets as current commit
-7. Clears unsaved changes flag
+4. Saves commit file to `0studio/{filename}/commit-{commitId}.3dm` via FileStorageService
+5. If cloud enabled, uploads to S3 and creates Supabase commit
+6. Adds to commits array
+7. Sets as current commit
+8. Clears unsaved changes flag
+9. Auto-saves `tree.json` via useEffect hook (includes new commit and updated branch head)
 
 **AI Commit**:
 1. User enters commit message
@@ -1016,23 +1122,31 @@ type SceneCommand =
 
 1. User clicks "Restore" on commit in history
 2. VersionControlContext.restoreToCommit(commitId)
-3. Retrieves ModelCommit from array (or downloads from S3 if cloud)
-4. Calls onModelRestore callback with modelData
-5. ModelContext restores scene:
+3. Retrieves fileBuffer from `0studio/{filename}/commit-{commitId}.3dm` (primary source)
+   - Falls back to in-memory fileBuffer if file doesn't exist
+   - Falls back to IndexedDB if in-memory not available
+   - Falls back to exporting from modelData if all else fails
+4. Loads file via rhino3dm-service.load3dmFile()
+5. Calls onModelRestore callback with modelData
+6. ModelContext restores scene:
    - If modelData.objects: setLoadedModel()
    - If serialized objects: restoreScene()
-6. Scene updates to show restored state
-7. VersionControlContext updates currentCommitId
+7. Scene updates to show restored state
+8. VersionControlContext updates currentCommitId
 
 ### Pulling from Commit (Updates File on Disk)
 
 1. User clicks "Pull" button on commit
 2. VersionControlContext.pullFromCommit(commitId)
-3. Retrieves fileBuffer from commit (or downloads from S3)
+3. Retrieves fileBuffer from `0studio/{filename}/commit-{commitId}.3dm` (primary source)
+   - Falls back to in-memory fileBuffer if file doesn't exist
+   - Falls back to IndexedDB if in-memory not available
+   - Falls back to exporting from modelData if all else fails
 4. Writes fileBuffer to disk via desktopAPI.writeFileBuffer()
 5. File is updated on disk
 6. Rhino detects change and auto-reloads
 7. ModelContext reloads model from disk
+8. Sets pulledCommitId for branch creation tracking
 
 ### Gallery Mode Workflow
 
@@ -1136,7 +1250,15 @@ type SceneCommand =
 
 ## Recent Updates & Features
 
-### Branching System (Latest)
+### Local File Storage & Tree Persistence (Latest)
+- **Local Commit Storage**: Commits stored as `commit-{commitId}.3dm` files in `0studio/{filename}/` folder
+- **Tree.json Persistence**: Branch and commit tree structure persisted to `tree.json` in same folder as commits
+- **Auto-Save**: Tree.json automatically saved on any commit/branch change
+- **Project Open**: Loads tree.json on project open (primary source, falls back to localStorage)
+- **Validation**: Validates commit files exist when loading tree.json, warns about missing files
+- **Error Handling**: Graceful error handling during save/load, doesn't throw on project close
+
+### Branching System
 - **GitHub-like Branching**: Automatic branch creation when committing from a non-head commit
 - **Visual Branch Tree**: SVG-based tree visualization with colored branch lines
 - **Pulled Commit Highlighting**: Amber highlight and "working" badge for the active pulled commit
@@ -1228,6 +1350,14 @@ type SceneCommand =
     - `switchBranch()` changes active branch, `keepBranch()` marks a branch as main
     - Branch colors are assigned from `BRANCH_COLORS` array in order of creation
     - Reset branches when closing project via `clearCurrentModel()`
+15. **Local File Storage**:
+    - Commit files stored in `0studio/{filename}/` folder as `commit-{commitId}.3dm`
+    - Tree.json stored in same folder, contains full branch and commit metadata
+    - Use `desktopAPI.saveCommitFile()`, `readCommitFile()`, `saveTreeFile()`, `loadTreeFile()`
+    - Tree.json auto-saves via useEffect when branches/commits change
+    - Load tree.json on project open, validate commit files exist
+    - Save tree.json before project close to ensure persistence
+    - Handle errors gracefully (log warnings, don't throw)
 
 ### Common Patterns
 
