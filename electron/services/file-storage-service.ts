@@ -4,18 +4,20 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 
 /**
  * Service for managing 0studio commit storage folders
- * Creates a folder next to the .3dm file and stores commit versions there
+ * Creates a 0studio folder in the same directory as the .3dm file
+ * with a subfolder for each file to store commit versions
  */
 export class FileStorageService {
   /**
    * Get the 0studio folder path for a given file
    * @param filePath Path to the .3dm file
-   * @returns Path to the 0studio folder (e.g., /path/to/0studio_filename)
+   * @returns Path to the file's commit folder (e.g., /path/to/0studio/filename)
    */
   getStorageFolderPath(filePath: string): string {
     const dir = dirname(filePath);
     const fileName = basename(filePath, extname(filePath));
-    return join(dir, `0studio_${fileName}`);
+    // Create structure: /path/to/0studio/filename/
+    return join(dir, '0studio', fileName);
   }
 
   /**
@@ -34,7 +36,7 @@ export class FileStorageService {
    * Get the commit file path for a given commit ID
    * @param filePath Path to the .3dm file
    * @param commitId Commit ID
-   * @returns Path to the commit file (e.g., /path/to/0studio_filename/commit-1234567890.3dm)
+   * @returns Path to the commit file (e.g., /path/to/0studio/filename/commit-1234567890.3dm)
    */
   getCommitFilePath(filePath: string, commitId: string): string {
     const folderPath = this.getStorageFolderPath(filePath);

@@ -144,6 +144,57 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     setModelRestoreCallback(handleModelRestore);
   }, [setModelRestoreCallback]);
 
+  // Handle project opened via Electron's native file dialog
+  useEffect(() => {
+    if (!desktopAPI.isDesktop) return;
+
+    const handleProjectOpened = async (project: { filePath: string; fileName: string }) => {
+      console.log('Project opened via native dialog:', project);
+      
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // Read the file using the actual file path from Electron
+        const arrayBuffer = await desktopAPI.readFileBuffer(project.filePath);
+        if (!arrayBuffer) {
+          throw new Error('Failed to read file buffer');
+        }
+
+        // Create a File object for the rhino3dm loader
+        const file = new File([arrayBuffer], project.fileName, { type: 'application/octet-stream' });
+        
+        // Load the 3dm file
+        const result = await load3dmFile(file);
+        setLoadedModel(result);
+
+        // Use the actual file path from Electron (not hardcoded!)
+        const filePath = project.filePath;
+        setCurrentFile(filePath);
+        setFileName(project.fileName);
+
+        console.log('Set current file for watching:', filePath);
+
+        // Create initial commit for version control with exact file buffer
+        await createInitialCommit(result, arrayBuffer, filePath);
+        console.log('Created initial commit for model opened via native dialog');
+
+      } catch (err) {
+        console.error('Failed to load 3DM file:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load file');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    desktopAPI.onProjectOpened(handleProjectOpened);
+
+    // Cleanup
+    return () => {
+      desktopAPI.removeAllListeners('project-opened');
+    };
+  }, [createInitialCommit]);
+
   // File change detection and handling
   useEffect(() => {
     if (!desktopAPI.isDesktop) return;
@@ -407,42 +458,21 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       // Get the file buffer for exact file storage in commits
       const fileBuffer = await file.arrayBuffer();
       
-      // Set current file info for version control
-      let filePath: string;
-      
-      if (desktopAPI.isDesktop) {
-        // In Electron, create a path that represents where the file might be saved
-        // For testing, you can create a real .3dm file at this path and modify it
-        filePath = `/Users/CKim23/Desktop/${file.name}`;
-        
-        // Inform Electron about the current file path for watching
-        try {
-          await desktopAPI.setCurrentFile(filePath);
-          console.log('Set current file for watching:', filePath);
-          console.log('To test file watching, save a .3dm file to this location and modify it');
-        } catch (err) {
-          console.warn('Failed to set current file:', err);
-        }
-      } else {
-        // In browser mode, we only have the file name
-        filePath = file.name;
-      }
+      // In browser mode, we only have the file name (no full path due to security)
+      // For Electron, the native dialog path is preferred (handled via project-opened event)
+      // This function is primarily for browser mode or drag-drop
+      const filePath = file.name;
       
       setCurrentFile(filePath);
       setFileName(file.name);
       
-      // Start file watching if in Electron
+      // Note: File watching requires a real file path, which is only available
+      // when opening via Electron's native dialog. Browser mode doesn't support watching.
       if (desktopAPI.isDesktop) {
-        try {
-          await desktopAPI.startFileWatching();
-          console.log('Started watching file for changes');
-        } catch (err) {
-          console.warn('Failed to start file watching:', err);
-        }
+        console.log('File imported via browser input - file watching requires native dialog for full path');
       }
 
       // Create initial commit for version control with exact file buffer
-      // Pass filePath to ensure the commit is saved even if currentModel isn't set yet
       await createInitialCommit(result, fileBuffer, filePath);
       console.log('Created initial commit for imported model with file buffer:', fileBuffer.byteLength, 'bytes');
       
@@ -493,8 +523,15 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, []);
 
-  const triggerFileDialog = useCallback(() => {
-    fileInputRef.current?.click();
+  const triggerFileDialog = useCallback(async () => {
+    if (desktopAPI.isDesktop) {
+      // In Electron, use the native file dialog which provides the full path
+      // The file will be loaded via the 'project-opened' event listener
+      await desktopAPI.openProjectDialog();
+    } else {
+      // In browser mode, use the HTML file input
+      fileInputRef.current?.click();
+    }
   }, []);
 
   const clearError = useCallback(() => {

@@ -24,13 +24,13 @@ This document describes the complete revamp of the file storage system in 0studi
 
 ### New System (Current)
 
-- **Storage**: Local file system only - commits stored as files in `0studio_<filename>` folders
+- **Storage**: Local file system only - commits stored as files in `0studio/<filename>` folders
 - **Simplicity**: Single storage mechanism, no external dependencies
 - **Benefits**: Faster, more reliable, easier to debug, works offline
 
 ### Key Principle
 
-When a user opens a `.3dm` file, 0studio creates a folder named `0studio_<filename>` in the same directory as the file. Every commit saves a duplicate copy of the file in this folder, named using the commit ID (e.g., `commit-1234567890-abc123.3dm`). This allows users to iterate through versions just like having multiple files, but managed through the UI.
+When a user opens a `.3dm` file, 0studio creates a folder named `0studio/<filename>` in the same directory as the file. Every commit saves a duplicate copy of the file in this folder, named using the commit ID (e.g., `commit-1234567890-abc123.3dm`). This allows users to iterate through versions just like having multiple files, but managed through the UI.
 
 ---
 
@@ -41,10 +41,11 @@ When a user opens a `.3dm` file, 0studio creates a folder named `0studio_<filena
 ```
 /path/to/
   ├── model.3dm                    # Working file (user's current file)
-  └── 0studio_model/                # Commit storage folder
-      ├── commit-1234567890-abc.3dm # Commit 1
-      ├── commit-1234567891-def.3dm # Commit 2
-      └── commit-1234567892-ghi.3dm # Commit 3
+  └── 0studio/                      # 0studio storage folder
+      └── model/                    # Commit storage folder for model.3dm
+          ├── commit-1234567890-abc.3dm # Commit 1
+          ├── commit-1234567891-def.3dm # Commit 2
+          └── commit-1234567892-ghi.3dm # Commit 3
 ```
 
 ### Core Components
@@ -53,7 +54,7 @@ When a user opens a `.3dm` file, 0studio creates a folder named `0studio_<filena
 
 New service that manages the 0studio commit folders:
 
-- `getStorageFolderPath(filePath)`: Returns path to `0studio_<filename>` folder
+- `getStorageFolderPath(filePath)`: Returns path to `0studio/<filename>` folder
 - `ensureStorageFolder(filePath)`: Creates folder if it doesn't exist
 - `getCommitFilePath(filePath, commitId)`: Returns path to specific commit file
 - `saveCommitFile(filePath, commitId, buffer)`: Saves commit file to folder
@@ -129,7 +130,7 @@ This ensures backwards compatibility with old commits while prioritizing the new
 ### Getting Started
 
 1. **Open a File**: Drag & drop a `.3dm` file onto the viewport, or use the file picker
-2. **Automatic Initial Commit**: When you open a file, 0studio automatically creates an initial commit and saves it to the `0studio_<filename>` folder
+2. **Automatic Initial Commit**: When you open a file, 0studio automatically creates an initial commit and saves it to the `0studio/<filename>` folder
 3. **Start Working**: Make changes to your model in Rhino or through the app
 
 ### Version Control Features
@@ -140,7 +141,7 @@ This ensures backwards compatibility with old commits while prioritizing the new
    - Make changes to your model
    - Enter a commit message in the version control panel
    - Click "Save Version" or press `Cmd/Ctrl + Shift + S`
-   - The current file is saved to the `0studio_<filename>` folder with a unique commit ID
+   - The current file is saved to the `0studio/<filename>` folder with a unique commit ID
 
 2. **AI Commit**:
    - Enter a natural language description of changes you want
@@ -186,7 +187,7 @@ This ensures backwards compatibility with old commits while prioritizing the new
 #### Where Files Are Stored
 
 - **Working File**: Your original `.3dm` file stays in its original location
-- **Commit Files**: All commit versions are stored in `0studio_<filename>` folder next to your file
+- **Commit Files**: All commit versions are stored in `0studio/<filename>` folder next to your file
 - **No Cloud**: Everything is stored locally on your computer
 
 #### File Naming
@@ -198,7 +199,7 @@ This ensures backwards compatibility with old commits while prioritizing the new
 #### Managing Storage
 
 - **Automatic**: 0studio automatically manages the commit folder
-- **Manual Access**: You can browse the `0studio_<filename>` folder in Finder/Explorer
+- **Manual Access**: You can browse the `0studio/<filename>` folder in Finder/Explorer
 - **Backup**: Simply copy the entire folder to backup all versions
 
 ### Keyboard Shortcuts
@@ -311,7 +312,7 @@ Potential enhancements:
 ### Commit Files Not Appearing
 
 1. Check that you're in Electron mode (not browser)
-2. Verify the `0studio_<filename>` folder exists next to your file
+2. Verify the `0studio/<filename>` folder exists next to your file
 3. Check console for error messages
 4. Verify file permissions
 
