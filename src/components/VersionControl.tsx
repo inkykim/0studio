@@ -470,7 +470,9 @@ export const VersionControl = () => {
 
   const handleCloseModel = () => {
     clearModel();
-    clearCurrentModel();
+    clearCurrentModel().catch(err => {
+      console.warn('Error clearing model:', err);
+    });
   };
 
   const handleKeepBranch = () => {

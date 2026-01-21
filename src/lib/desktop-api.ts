@@ -155,6 +155,22 @@ class DesktopAPIService {
     return (window.electronAPI as any).commitFileExists(filePath, commitId);
   }
 
+  // Tree file operations
+  async saveTreeFile(filePath: string, treeData: any): Promise<void> {
+    if (!this.isElectron || !window.electronAPI) return;
+    return (window.electronAPI as any).saveTreeFile(filePath, treeData);
+  }
+
+  async loadTreeFile(filePath: string): Promise<any> {
+    if (!this.isElectron || !window.electronAPI) return null;
+    return (window.electronAPI as any).loadTreeFile(filePath);
+  }
+
+  async validateCommitFiles(filePath: string, commitIds: string[]): Promise<string[]> {
+    if (!this.isElectron || !window.electronAPI) return [];
+    return (window.electronAPI as any).validateCommitFiles(filePath, commitIds);
+  }
+
   // Event Listeners
   onProjectOpened(callback: (project: ProjectInfo) => void): void {
     if (!this.isElectron || !window.electronAPI) return;

@@ -49,7 +49,7 @@ interface VersionControlContextType {
   pullFromCommit: (commitId: string) => Promise<boolean>; // Pull commit to local file (updates file on disk)
   markUnsavedChanges: () => void;
   clearUnsavedChanges: () => void;
-  clearCurrentModel: () => void;
+  clearCurrentModel: () => Promise<void>;
   toggleStarCommit: (commitId: string) => void; // Toggle star status of a commit
   getStarredCommits: () => ModelCommit[]; // Get all starred commits
   
@@ -104,6 +104,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [onAICommit, setOnAICommit] = useState<((message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>) | undefined>(undefined);
   const [isGalleryMode, setIsGalleryMode] = useState(false);
   const [selectedCommitIds, setSelectedCommitIds] = useState<Set<string>>(new Set());
+  const [isLoadingTree, setIsLoadingTree] = useState(false);
   
   // Branching state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -213,6 +214,102 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     return { commits: [], branches: [] };
   }, [getStorageKey]);
 
+  // Helper function to save tree.json file
+  const saveTreeFile = useCallback(async (filePath: string) => {
+    if (!desktopAPI.isDesktop || !filePath) {
+      return; // Silently return if not desktop or no file path
+    }
+
+    try {
+      const treeData = {
+        version: '1.0',
+        activeBranchId: activeBranchId,
+        currentCommitId: currentCommitId,
+        branches: branches.map(b => ({
+          id: b.id,
+          name: b.name,
+          headCommitId: b.headCommitId,
+          color: b.color,
+          isMain: b.isMain,
+          parentBranchId: b.parentBranchId,
+          originCommitId: b.originCommitId,
+        })),
+        commits: commits.map(c => ({
+          id: c.id,
+          message: c.message,
+          timestamp: c.timestamp,
+          parentCommitId: c.parentCommitId,
+          branchId: c.branchId,
+          starred: c.starred || false,
+        })),
+      };
+
+      await desktopAPI.saveTreeFile(filePath, treeData);
+      console.log(`Saved tree.json for: ${filePath}`);
+    } catch (error) {
+      // Don't throw - just log, as this is a non-critical operation
+      // Errors can happen during cleanup or if file system is unavailable
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.includes('ENOENT') && !errorMessage.includes('not found')) {
+        console.warn('Failed to save tree.json (non-critical):', errorMessage);
+      }
+    }
+  }, [branches, commits, activeBranchId, currentCommitId]);
+
+  // Helper function to load tree.json file
+  const loadTreeFile = useCallback(async (filePath: string): Promise<{ branches: Branch[], commits: ModelCommit[], activeBranchId: string | null, currentCommitId: string | null } | null> => {
+    if (!desktopAPI.isDesktop || !filePath) return null;
+
+    try {
+      const treeData = await desktopAPI.loadTreeFile(filePath);
+      if (!treeData) return null;
+
+      console.log(`Loaded tree.json for: ${filePath}`);
+
+      // Validate commit files exist
+      const commitIds = treeData.commits.map((c: any) => c.id);
+      const missingCommitIds = await desktopAPI.validateCommitFiles(filePath, commitIds);
+      
+      if (missingCommitIds.length > 0) {
+        console.warn(`⚠️ Warning: ${missingCommitIds.length} commit file(s) missing:`, missingCommitIds);
+        // Filter out commits with missing files
+        treeData.commits = treeData.commits.filter((c: any) => !missingCommitIds.includes(c.id));
+      }
+
+      // Convert tree data to Branch and ModelCommit arrays
+      const loadedBranches: Branch[] = treeData.branches.map((b: any) => ({
+        id: b.id,
+        name: b.name,
+        headCommitId: b.headCommitId,
+        color: b.color,
+        isMain: b.isMain,
+        parentBranchId: b.parentBranchId,
+        originCommitId: b.originCommitId,
+      }));
+
+      const loadedCommits: ModelCommit[] = treeData.commits.map((c: any) => ({
+        id: c.id,
+        message: c.message,
+        timestamp: c.timestamp,
+        parentCommitId: c.parentCommitId,
+        branchId: c.branchId,
+        starred: c.starred || false,
+        // Note: modelData and fileBuffer are not stored in tree.json
+        // They will be loaded from files when needed
+      }));
+
+      return {
+        branches: loadedBranches,
+        commits: loadedCommits,
+        activeBranchId: treeData.activeBranchId,
+        currentCommitId: treeData.currentCommitId,
+      };
+    } catch (error) {
+      console.error('Failed to load tree.json:', error);
+      return null;
+    }
+  }, []);
+
   const setCurrentModel = useCallback((path: string) => {
     setCurrentModelState(path);
     
@@ -225,51 +322,66 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setHasUnsavedChanges(false);
     setPulledCommitId(null);
 
-    // Load persisted commits from localStorage (async)
-    loadCommitsFromStorage(path).then(({ commits: persistedCommits, branches: persistedBranches }) => {
-      // Load branches
-      if (persistedBranches.length > 0) {
-        setBranches(persistedBranches);
-        // Set active branch to main or first branch
-        const mainBranch = persistedBranches.find(b => b.isMain);
-        setActiveBranchId(mainBranch?.id || persistedBranches[0]?.id || null);
-      }
-      
-      if (persistedCommits.length > 0) {
-        console.log(`Found ${persistedCommits.length} persisted commits for file`);
-        // Only update if we don't already have commits (to avoid overwriting initial commit)
-        setCommits(prevCommits => {
-          // If we already have commits (e.g., from createInitialCommit), merge them
-          if (prevCommits.length > 0) {
-            // Merge: keep existing commits, add new ones that don't exist
-            const existingIds = new Set(prevCommits.map(c => c.id));
-            const newCommits = persistedCommits.filter(c => !existingIds.has(c.id));
-            const merged = [...prevCommits, ...newCommits].sort((a, b) => b.timestamp - a.timestamp);
-            console.log(`Merged commits: ${prevCommits.length} existing + ${newCommits.length} new = ${merged.length} total`);
-            return merged;
-          }
-          return persistedCommits;
-        });
-        
-        // Set current commit to the latest one
-        setCommits(prevCommits => {
-          if (prevCommits.length > 0) {
-            const latestCommit = prevCommits[0];
-            setCurrentCommitId(latestCommit.id);
-          }
-          return prevCommits;
-        });
+    // Load from tree.json first (primary source), then fall back to localStorage
+    setIsLoadingTree(true);
+    loadTreeFile(path).then(treeData => {
+      if (treeData) {
+        // Loaded from tree.json
+        console.log(`Loaded ${treeData.commits.length} commits and ${treeData.branches.length} branches from tree.json`);
+        setBranches(treeData.branches);
+        setCommits(treeData.commits);
+        setActiveBranchId(treeData.activeBranchId);
+        setCurrentCommitId(treeData.currentCommitId);
+        setIsLoadingTree(false);
       } else {
-        // No persisted commits, but don't clear if we already have commits from createInitialCommit
-        setCommits(prevCommits => {
-          if (prevCommits.length === 0) {
-            setCurrentCommitId(null);
+        // Fall back to localStorage (for backwards compatibility)
+        loadCommitsFromStorage(path).then(({ commits: persistedCommits, branches: persistedBranches }) => {
+          // Load branches
+          if (persistedBranches.length > 0) {
+            setBranches(persistedBranches);
+            // Set active branch to main or first branch
+            const mainBranch = persistedBranches.find(b => b.isMain);
+            setActiveBranchId(mainBranch?.id || persistedBranches[0]?.id || null);
           }
-          return prevCommits;
+          
+          if (persistedCommits.length > 0) {
+            console.log(`Found ${persistedCommits.length} persisted commits for file`);
+            // Only update if we don't already have commits (to avoid overwriting initial commit)
+            setCommits(prevCommits => {
+              // If we already have commits (e.g., from createInitialCommit), merge them
+              if (prevCommits.length > 0) {
+                // Merge: keep existing commits, add new ones that don't exist
+                const existingIds = new Set(prevCommits.map(c => c.id));
+                const newCommits = persistedCommits.filter(c => !existingIds.has(c.id));
+                const merged = [...prevCommits, ...newCommits].sort((a, b) => b.timestamp - a.timestamp);
+                console.log(`Merged commits: ${prevCommits.length} existing + ${newCommits.length} new = ${merged.length} total`);
+                return merged;
+              }
+              return persistedCommits;
+            });
+            
+            // Set current commit to the latest one
+            setCommits(prevCommits => {
+              if (prevCommits.length > 0) {
+                const latestCommit = prevCommits[0];
+                setCurrentCommitId(latestCommit.id);
+              }
+              return prevCommits;
+            });
+          } else {
+            // No persisted commits, but don't clear if we already have commits from createInitialCommit
+            setCommits(prevCommits => {
+              if (prevCommits.length === 0) {
+                setCurrentCommitId(null);
+              }
+              return prevCommits;
+            });
+          }
+          setIsLoadingTree(false);
         });
       }
     });
-  }, [loadCommitsFromStorage]);
+  }, [loadCommitsFromStorage, loadTreeFile]);
 
   const createInitialCommit = useCallback(async (modelData: LoadedModel, fileBuffer?: ArrayBuffer, filePath?: string) => {
     // Only create initial commit if no commits exist
@@ -340,7 +452,21 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
       return prevCommits;
     });
-  }, [currentModel, saveCommitsToStorage]);
+  }, [currentModel, saveCommitsToStorage, saveTreeFile]);
+
+  // Auto-save tree.json whenever branches, commits, activeBranchId, or currentCommitId change
+  // Skip saving during initial load (when commits/branches are being loaded)
+  useEffect(() => {
+    if (currentModel && (branches.length > 0 || commits.length > 0) && !isLoadingTree) {
+      // Use a ref to track if we're currently clearing to avoid race conditions
+      saveTreeFile(currentModel).catch(error => {
+        // Only log if it's not a "file doesn't exist" type error (which can happen during cleanup)
+        if (error && !error.message?.includes('ENOENT') && !error.message?.includes('not found')) {
+          console.warn('Failed to auto-save tree.json (non-critical):', error);
+        }
+      });
+    }
+  }, [branches, commits, activeBranchId, currentCommitId, currentModel, saveTreeFile, isLoadingTree]);
 
   // Debug: Track hasUnsavedChanges state changes
   useEffect(() => {
@@ -726,7 +852,19 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setHasUnsavedChanges(false);
   }, []);
 
-  const clearCurrentModel = useCallback(() => {
+  const clearCurrentModel = useCallback(async () => {
+    // Save tree.json one final time before clearing (if we have data to save)
+    const modelToSave = currentModel;
+    if (modelToSave && (branches.length > 0 || commits.length > 0)) {
+      try {
+        await saveTreeFile(modelToSave);
+        console.log('Saved tree.json before clearing model');
+      } catch (error) {
+        // Don't throw - just log, as we're closing anyway
+        console.warn('Failed to save tree.json before clearing (non-critical):', error);
+      }
+    }
+    
     setCurrentModelState(null);
     setModelName(null);
     setCommits([]);
@@ -739,15 +877,15 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setBranches([]);
     setActiveBranchId(null);
     setPulledCommitId(null);
-  }, []);
+  }, [currentModel, branches, commits, saveTreeFile]);
 
   // Handle project-closed event from Electron
   useEffect(() => {
     if (!desktopAPI.isDesktop) return;
 
-    const handleProjectClosed = () => {
+    const handleProjectClosed = async () => {
       console.log('Project closed event received, clearing model and resetting gallery mode');
-      clearCurrentModel();
+      await clearCurrentModel();
     };
 
     // Set up project closed listener

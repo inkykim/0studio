@@ -213,6 +213,12 @@ class RhinoStudio {
       this.listCommitFiles(filePath));
     ipcMain.handle('commit-file-exists', (_, filePath: string, commitId: string) => 
       this.commitFileExists(filePath, commitId));
+    ipcMain.handle('save-tree-file', (_, filePath: string, treeData: any) => 
+      this.saveTreeFile(filePath, treeData));
+    ipcMain.handle('load-tree-file', (_, filePath: string) => 
+      this.loadTreeFile(filePath));
+    ipcMain.handle('validate-commit-files', (_, filePath: string, commitIds: string[]) => 
+      this.validateCommitFiles(filePath, commitIds));
   }
 
   private async openProjectDialog(): Promise<string | null> {
@@ -327,6 +333,19 @@ class RhinoStudio {
 
   private commitFileExists(filePath: string, commitId: string): boolean {
     return this.fileStorage.commitFileExists(filePath, commitId);
+  }
+
+  // Tree file methods
+  private async saveTreeFile(filePath: string, treeData: any): Promise<void> {
+    await this.fileStorage.saveTreeFile(filePath, treeData);
+  }
+
+  private async loadTreeFile(filePath: string): Promise<any> {
+    return await this.fileStorage.loadTreeFile(filePath);
+  }
+
+  private validateCommitFiles(filePath: string, commitIds: string[]): string[] {
+    return this.fileStorage.validateCommitFiles(filePath, commitIds);
   }
 
   private async saveModelVersion(): Promise<void> {

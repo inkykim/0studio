@@ -62,6 +62,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('list-commit-files', filePath),
       commitFileExists: (filePath: string, commitId: string) => 
         ipcRenderer.invoke('commit-file-exists', filePath, commitId),
+      saveTreeFile: (filePath: string, treeData: any) => 
+        ipcRenderer.invoke('save-tree-file', filePath, treeData),
+      loadTreeFile: (filePath: string) => 
+        ipcRenderer.invoke('load-tree-file', filePath),
+      validateCommitFiles: (filePath: string, commitIds: string[]) => 
+        ipcRenderer.invoke('validate-commit-files', filePath, commitIds),
 
       // Event listeners
   onProjectOpened: (callback: (project: ProjectInfo) => void) => {
@@ -117,6 +123,9 @@ declare global {
       readCommitFile: (filePath: string, commitId: string) => Promise<ArrayBuffer | null>;
       listCommitFiles: (filePath: string) => Promise<string[]>;
       commitFileExists: (filePath: string, commitId: string) => Promise<boolean>;
+      saveTreeFile: (filePath: string, treeData: any) => Promise<void>;
+      loadTreeFile: (filePath: string) => Promise<any>;
+      validateCommitFiles: (filePath: string, commitIds: string[]) => Promise<string[]>;
       
       onProjectOpened: (callback: (project: ProjectInfo) => void) => void;
       onProjectClosed: (callback: () => void) => void;

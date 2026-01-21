@@ -57,6 +57,9 @@ declare global {
       readCommitFile: (filePath: string, commitId: string) => Promise<ArrayBuffer | null>;
       listCommitFiles: (filePath: string) => Promise<string[]>;
       commitFileExists: (filePath: string, commitId: string) => Promise<boolean>;
+      saveTreeFile: (filePath: string, treeData: any) => Promise<void>;
+      loadTreeFile: (filePath: string) => Promise<any>;
+      validateCommitFiles: (filePath: string, commitIds: string[]) => Promise<string[]>;
       
       onProjectOpened: (callback: (project: ProjectInfo) => void) => void;
       onProjectClosed: (callback: () => void) => void;
