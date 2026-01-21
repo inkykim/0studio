@@ -1,81 +1,286 @@
-# AWS S3 Setup Guide for 0studio
+# AWS S3 Architecture & Deployment Guide
 
-Complete guide to set up AWS S3 storage for your 0studio application.
+**SaaS File Storage Platform ("GitHub for Architects")**  
+**Version:** v1.0 (MVP scope)
 
-## Prerequisites
+---
 
-- AWS account with $10k credits (you have this!)
-- AWS CLI installed (optional, but helpful)
-- Supabase project already set up
+## Overview
 
-## Step 1: Create S3 Bucket
+This document describes the AWS architecture and deployment model for 0studio, a SaaS product that provides organized, versioned cloud storage for large architectural 3D model files.
 
-### Option A: Using AWS Console (Recommended for beginners)
+The product is conceptually a "GitHub for architects", but does not use Git. Instead, it focuses on:
+- **Explicit version history** (iterations: v1, v2, v3...)
+- **Secure cloud storage**
+- **Easy retrieval**
+- **Team-based sharing** (enterprise plans)
 
-1. **Go to AWS S3 Console**
-   - Visit https://console.aws.amazon.com/s3/
-   - Click "Create bucket"
+### Product Constraints
 
-2. **Configure Bucket**
-   - **Bucket name**: `0studio-files` (must be globally unique, add your initials if needed)
-   - **AWS Region**: Choose closest to your users (e.g., `us-east-1`, `us-west-2`, `eu-west-1`)
-   - **Object Ownership**: ACLs disabled (recommended)
-   - **Block Public Access**: ✅ Keep all boxes checked (we use presigned URLs, not public access)
-   - **Bucket Versioning**: ✅ Enable (CRITICAL - required for file versioning)
-   - **Default encryption**: Enable (recommended)
-   - Click "Create bucket"
+- Large files (hundreds of MB → multiple GB)
+- Explicit versioning (v1, v2, v3…)
+- Per-user and per-team access control
+- Only one local copy; full history in cloud
+- No file processing, diffing, or parsing
 
-3. **Enable Versioning** (if not done above)
-   - Click on your bucket
-   - Go to "Properties" tab
-   - Scroll to "Bucket Versioning"
-   - Click "Edit" → Select "Enable" → Save
+---
 
-### Option B: Using AWS CLI
+## Technology Stack
 
-```bash
-# Create bucket
-aws s3api create-bucket \
-  --bucket 0studio-files \
-  --region us-east-1 \
-  --create-bucket-configuration LocationConstraint=us-east-1
+### External Services
 
-# Enable versioning
-aws s3api put-bucket-versioning \
-  --bucket 0studio-files \
-  --versioning-configuration Status=Enabled
+| Service | Purpose |
+|---------|---------|
+| **Supabase** | Authentication (JWT) & Metadata database (Postgres) |
+| **Stripe** | Subscription plans & Feature gating |
+
+### AWS Infrastructure
+
+| Service | Purpose |
+|---------|---------|
+| **Amazon S3** | Private object storage |
+| **AWS Lambda** | Backend API (or Node.js server) |
+| **Amazon API Gateway** | HTTP routing |
+| **AWS IAM** | Access control |
+
+---
+
+## High-Level Architecture
+
+```
+Client (Web / Desktop)
+   |
+   |  HTTPS + Supabase JWT
+   |
+API Gateway / Express Server
+   |
+Backend (Lambda or Node.js)
+   |
+   |— JWT validation (Supabase)
+   |— Permission checks (DB)
+   |— Stripe plan enforcement
+   |— Pre-signed S3 URLs
+   |
+Amazon S3 (Private)
 ```
 
-## Step 2: Create IAM User for Backend
+### Core Security Rule
 
-1. **Go to IAM Console**
-   - Visit https://console.aws.amazon.com/iam/
-   - Click "Users" → "Create user"
+> **Clients NEVER receive AWS credentials and NEVER access S3 without pre-signed URLs.**
 
-2. **Set User Details**
-   - **User name**: `0studio-backend`
-   - Click "Next"
+---
 
-3. **Set Permissions**
-   - Select "Attach policies directly"
-   - Search for and select: `AmazonS3FullAccess`
-   - ⚠️ **For production**, create a custom policy with minimal permissions (see below)
-   - Click "Next" → "Create user"
+## Storage Architecture (Amazon S3)
 
-4. **Save Credentials**
-   - Click on the newly created user
-   - Go to "Security credentials" tab
-   - Click "Create access key"
-   - Select "Application running outside AWS"
-   - Click "Create access key"
-   - **IMPORTANT**: Copy both:
-     - Access Key ID
-     - Secret Access Key
-   - ⚠️ You won't be able to see the secret key again!
+### Bucket Configuration
 
-### Custom IAM Policy (Recommended for Production)
+| Setting | Value |
+|---------|-------|
+| **Bucket name** | `0studio-files` |
+| **Region** | `us-east-1` |
+| **Public access** | Fully blocked |
+| **Bucket versioning** | **Disabled** (versioning handled manually via explicit files) |
 
-Instead of `AmazonS3FullAccess`, create a custom policy with minimal permissions:
+### Object Key Naming Convention (Authoritative)
+
+All files **must** follow this exact format:
+
+```
+users/{user_id}/projects/{project_id}/models/{model_id}/versions/{version_name}-{original_file_name}
+```
+
+**Example:**
+```
+users/123/projects/456/models/789/versions/v12-building.ifc
+```
+
+**Why this matters:**
+- Clear per-user isolation
+- Predictable access control
+- Easy iteration tracking
+- No client-generated paths
+
+### Versioning Strategy
+
+Each iteration is stored as a **new S3 object** (explicit version files).
+
+| Version | S3 Key |
+|---------|--------|
+| v1 | `users/123/projects/456/models/789/versions/v1-building.ifc` |
+| v2 | `users/123/projects/456/models/789/versions/v2-building.ifc` |
+| v3 | `users/123/projects/456/models/789/versions/v3-building.ifc` |
+
+> ❌ **S3 native versioning is NOT used.** Each version is a separate object.
+
+---
+
+## Metadata Architecture (Supabase)
+
+S3 stores **raw files only**. Supabase Postgres stores **all structure and permissions**.
+
+### Database Tables
+
+```sql
+-- Projects
+projects
+  id uuid primary key
+  owner_id uuid
+  org_id uuid null
+  name text
+  created_at timestamp
+
+-- Models (files within projects)
+models
+  id uuid primary key
+  project_id uuid
+  name text
+  created_at timestamp
+
+-- Model Versions (explicit versioning)
+model_versions
+  id uuid primary key
+  model_id uuid
+  s3_key text
+  version_name text
+  file_size bigint
+  uploaded_by uuid
+  is_current boolean
+  created_at timestamp
+
+-- Team Access (enterprise)
+project_members
+  project_id uuid
+  user_id uuid
+  role text  -- 'owner', 'editor', 'viewer'
+```
+
+### Full SQL Schema
+
+Run in Supabase SQL Editor (see `SUPABASE_SETUP.md` for complete schema with RLS policies).
+
+---
+
+## Backend API Endpoints
+
+All endpoints require:
+```
+Authorization: Bearer <SUPABASE_JWT>
+```
+
+### POST /files/upload-url
+
+**Purpose:** Generate a pre-signed S3 PUT URL for uploading a new version.
+
+**Request:**
+```json
+{
+  "project_id": "uuid",
+  "model_id": "uuid",
+  "version_name": "v12",
+  "file_name": "building.ifc",
+  "file_size": 482394823
+}
+```
+
+**Backend Flow:**
+1. Validate JWT
+2. Verify project access
+3. Enforce Stripe plan limits
+4. Generate S3 key
+5. Generate pre-signed PUT URL (≤ 15 min)
+
+**Response:**
+```json
+{
+  "upload_url": "https://s3-presigned-url...",
+  "s3_key": "users/123/projects/456/models/789/versions/v12-building.ifc"
+}
+```
+
+### POST /files/confirm-upload
+
+**Purpose:** Persist metadata after upload completes.
+
+**Request:**
+```json
+{
+  "model_id": "uuid",
+  "s3_key": "users/123/projects/456/models/789/versions/v12-building.ifc",
+  "version_name": "v12",
+  "file_size": 482394823
+}
+```
+
+**Backend Flow:**
+1. Validate JWT
+2. Verify permission
+3. Mark old versions `is_current = false`
+4. Insert new `model_versions` row
+5. Set `is_current = true`
+
+**Response:**
+```json
+{
+  "success": true,
+  "version": { "id": "uuid", "version_name": "v12", ... }
+}
+```
+
+### POST /files/download-url
+
+**Purpose:** Generate a pre-signed S3 GET URL.
+
+**Request:**
+```json
+{
+  "s3_key": "users/123/projects/456/models/789/versions/v12-building.ifc"
+}
+```
+
+**Backend Flow:**
+1. Validate JWT
+2. Look up metadata
+3. Verify access
+4. Generate pre-signed GET URL (≤ 15 min)
+
+**Response:**
+```json
+{
+  "download_url": "https://s3-presigned-url..."
+}
+```
+
+### GET /files/versions?model_id=uuid
+
+**Purpose:** List all versions of a model.
+
+**Response:**
+```json
+{
+  "versions": [
+    { "id": "uuid", "version_name": "v12", "file_size": 482394823, ... },
+    { "id": "uuid", "version_name": "v11", "file_size": 480000000, ... }
+  ]
+}
+```
+
+### POST /files/models
+
+**Purpose:** Create a new model within a project.
+
+**Request:**
+```json
+{
+  "project_id": "uuid",
+  "name": "Main Building"
+}
+```
+
+---
+
+## IAM Configuration
+
+### Lambda/Backend IAM Policy
 
 ```json
 {
@@ -84,180 +289,237 @@ Instead of `AmazonS3FullAccess`, create a custom policy with minimal permissions
     {
       "Effect": "Allow",
       "Action": [
-        "s3:PutObject",
         "s3:GetObject",
-        "s3:DeleteObject",
-        "s3:ListBucket",
-        "s3:ListBucketVersions",
-        "s3:GetObjectVersion"
+        "s3:PutObject",
+        "s3:DeleteObject"
       ],
-      "Resource": [
-        "arn:aws:s3:::0studio-files",
-        "arn:aws:s3:::0studio-files/*"
-      ]
+      "Resource": "arn:aws:s3:::0studio-files/*"
     }
   ]
 }
 ```
 
-## Step 3: Get Supabase Service Role Key
+### Security Guarantees
 
-1. **Go to Supabase Dashboard**
-   - Visit https://app.supabase.com
-   - Select your project
+- ✅ No public S3 access
+- ✅ No per-user IAM roles
+- ✅ All authorization enforced by backend
 
-2. **Get Service Role Key**
-   - Go to Settings → API
-   - Find "Project API keys"
-   - Copy the `service_role` key (NOT the `anon` key!)
-   - ⚠️ This key has admin access - keep it secret!
+---
 
-## Step 4: Configure Backend
+## Setup Instructions
 
-1. **Create `.env` file**
-   ```bash
-   cd backend
-   cp .env.example .env
-   ```
+### Step 1: Create S3 Bucket
 
-2. **Edit `.env` file** with your values:
-   ```env
-   # AWS Configuration
-   AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
-   AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-   AWS_REGION=us-east-1
-   S3_BUCKET_NAME=0studio-files
+**Using AWS Console:**
 
-   # Supabase Configuration
-   SUPABASE_URL=https://your-project-id.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+1. Go to https://console.aws.amazon.com/s3/
+2. Click "Create bucket"
+3. Configure:
+   - **Bucket name**: `0studio-files` (must be globally unique)
+   - **Region**: `us-east-1`
+   - **Block Public Access**: ✅ Keep ALL boxes checked
+   - **Bucket Versioning**: ❌ Keep **Disabled** (we use explicit versioning)
+4. Click "Create bucket"
 
-   # Server Configuration
-   PORT=3000
-   FRONTEND_URL=http://localhost:5173
-   ```
+**Using AWS CLI:**
 
-## Step 5: Test Backend
+```bash
+# Create bucket
+aws s3api create-bucket \
+  --bucket 0studio-files \
+  --region us-east-1
 
-1. **Start the backend server**
-   ```bash
-   cd backend
-   npm run dev
-   ```
-
-2. **Test health endpoint**
-   ```bash
-   curl http://localhost:3000/health
-   ```
-   Should return: `{"status":"ok","timestamp":"..."}`
-
-3. **Test authenticated endpoint** (requires Supabase token)
-   - First, sign in to your app and get the JWT token from browser DevTools
-   - Or use Supabase Dashboard → Authentication → Users → Create a test token
-   
-   ```bash
-   curl -H "Authorization: Bearer YOUR_SUPABASE_JWT_TOKEN" \
-     "http://localhost:3000/api/aws/presigned-upload?key=org-test123/project-test456/models/test.3dm"
-   ```
-
-## Step 6: Update Frontend Environment
-
-Add to your frontend `.env` file (in project root):
-
-```env
-VITE_AWS_API_URL=http://localhost:3000/api/aws
+# Verify public access is blocked
+aws s3api put-public-access-block \
+  --bucket 0studio-files \
+  --public-access-block-configuration \
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 ```
 
-For production, update this to your deployed backend URL.
+### Step 2: Create IAM User
 
-## Step 7: Verify Everything Works
+1. Go to https://console.aws.amazon.com/iam/
+2. Click "Users" → "Create user"
+3. **User name**: `0studio-backend`
+4. Attach the custom policy above (or `AmazonS3FullAccess` for development)
+5. Create access key and save credentials
 
-1. **Start backend**: `cd backend && npm run dev`
-2. **Start frontend**: `npm run dev`
-3. **Sign in** to your app
-4. **Try uploading a file** (when you implement the upload feature)
+### Step 3: Configure Backend Environment
 
-## Cost Estimation
+Create `backend/.env`:
 
-With your $10k AWS credits, here's what to expect:
+```env
+# AWS Configuration
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+AWS_REGION=us-east-1
+S3_BUCKET_NAME=0studio-files
 
-**Monthly costs** (example with 100 active users, 10GB storage):
-- **S3 Storage**: ~$0.023/GB/month = $0.23 for 10GB
-- **S3 Requests**: ~$0.005 per 1,000 requests = ~$0.50/month
-- **Data Transfer Out**: First 100GB free, then ~$0.09/GB = ~$1-2/month
-- **Total**: ~$2-3/month
+# Supabase Configuration
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
-**Your credits will last**: ~3,000-5,000 months (250-400 years!) 😄
+# Stripe Configuration
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Server Configuration
+PORT=3000
+FRONTEND_URL=http://localhost:5173
+```
+
+### Step 4: Run Database Migration
+
+Run the SQL schema in Supabase SQL Editor (see `SUPABASE_SETUP.md`).
+
+### Step 5: Start Backend
+
+```bash
+cd backend
+npm install
+npm run dev
+```
+
+### Step 6: Test Endpoints
+
+```bash
+# Health check
+curl http://localhost:3000/health
+
+# Get upload URL (requires auth)
+curl -X POST http://localhost:3000/files/upload-url \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "uuid",
+    "model_id": "uuid",
+    "version_name": "v1",
+    "file_name": "building.ifc",
+    "file_size": 1000000
+  }'
+```
+
+---
+
+## Security Model
+
+| Rule | Implementation |
+|------|----------------|
+| JWT validation | Every request validates Supabase JWT |
+| Short-lived URLs | Pre-signed URLs expire in 15 minutes |
+| Server-side keys | S3 keys generated only by backend |
+| No metadata in S3 | All metadata stored in Supabase |
+
+---
+
+## Stripe Plan Limits
+
+| Plan | Max File Size |
+|------|---------------|
+| Free | 500 MB |
+| Student | 500 MB |
+| Enterprise | 5 GB |
+
+Limits are enforced in `POST /files/upload-url` before generating pre-signed URLs.
+
+---
+
+## Explicit Non-Goals
+
+- ❌ Git-style diffs
+- ❌ File parsing or previews
+- ❌ Real-time collaboration
+- ❌ CAD-specific processing
+- ❌ Local sync daemon
+
+---
+
+## Future Enhancements (Not Implemented)
+
+- CloudFront CDN
+- Glacier archival rules
+- Audit logs (enterprise)
+- File locking
+- Retention policies
+
+---
+
+## Rules for Coding LLMs & Contributors
+
+1. **Never bypass backend** for S3 access
+2. **Never trust client-provided** user IDs
+3. **Never store metadata** in S3
+4. **Always enforce Stripe limits** server-side
+5. **Always generate S3 keys** server-side
+
+---
+
+## One-Line System Summary
+
+> A server-mediated, versioned S3 storage system where Supabase manages identity and metadata, Stripe controls entitlements, and the backend issues temporary access to private files.
+
+---
+
+## Frontend API Usage
+
+```typescript
+import { filesAPI } from '@/lib/aws-api';
+
+// Upload a new version
+const version = await filesAPI.uploadVersion(
+  projectId,
+  modelId,
+  'v12',
+  'building.ifc',
+  fileBuffer,
+  'application/octet-stream'
+);
+
+// Download a version
+const fileData = await filesAPI.downloadVersion(s3Key);
+
+// List all versions
+const versions = await filesAPI.listVersions(modelId);
+
+// Create a new model
+const model = await filesAPI.createModel({
+  project_id: projectId,
+  name: 'Main Building'
+});
+```
+
+---
 
 ## Troubleshooting
 
 ### "Access Denied" errors
 - Check IAM user has correct permissions
 - Verify bucket name matches `.env` file
-- Ensure bucket region matches `AWS_REGION` in `.env`
 
-### "Bucket not found" errors
-- Verify bucket name is correct (case-sensitive)
-- Check AWS region matches
-- Ensure bucket exists in your AWS account
+### "Project not found" errors
+- Ensure project exists in Supabase
+- Check user has access to project
 
-### "Invalid token" errors
-- Verify Supabase URL is correct
-- Check service role key (not anon key)
-- Ensure user is authenticated in frontend
+### "Plan limit exceeded" errors
+- User needs to upgrade Stripe subscription
+- Check file size is within plan limits
 
 ### "S3 key does not belong to user" errors
-- S3 keys must start with `org-{userId}/`
+- S3 keys must start with `users/{userId}/`
 - Verify user ID matches authenticated user
-- Check the `generateS3Key` function format
 
-### Version ID not returned on upload
-- Ensure bucket versioning is enabled
-- Check bucket properties → Versioning → Enabled
+---
 
-## Next Steps
+## Cost Estimation
 
-1. ✅ Backend API is set up
-2. ✅ Frontend AWS API is updated
-3. ⏭️ Integrate with VersionControlContext to store commits in S3
-4. ⏭️ Add UI for syncing commits to cloud
-5. ⏭️ Deploy backend to production
+With standard S3 pricing in `us-east-1`:
 
-## Security Checklist
+| Usage | Cost |
+|-------|------|
+| Storage | ~$0.023/GB/month |
+| PUT requests | ~$0.005 per 1,000 |
+| GET requests | ~$0.0004 per 1,000 |
+| Data transfer | First 100GB free, then ~$0.09/GB |
 
-- ✅ S3 bucket has versioning enabled
-- ✅ Bucket has Block Public Access enabled
-- ✅ IAM user has minimal required permissions
-- ✅ Backend verifies Supabase JWT tokens
-- ✅ Backend validates user ownership of S3 keys
-- ✅ Rate limiting enabled on API endpoints
-- ✅ `.env` file is in `.gitignore`
-- ✅ Service role key is kept secret
-
-## Production Deployment
-
-When ready to deploy:
-
-1. **Deploy backend** to:
-   - AWS Elastic Beanstalk (recommended)
-   - AWS Lambda + API Gateway
-   - VPS (DigitalOcean, Linode, etc.)
-
-2. **Update frontend `.env`**:
-   ```env
-   VITE_AWS_API_URL=https://your-backend-domain.com/api/aws
-   ```
-
-3. **Set production environment variables** on your hosting platform
-
-4. **Enable HTTPS** (required for production)
-
-5. **Set up monitoring** (CloudWatch, etc.)
-
-## Support
-
-If you run into issues:
-1. Check backend logs: `cd backend && npm run dev`
-2. Check browser console for frontend errors
-3. Verify all environment variables are set correctly
-4. Test backend endpoints with curl/Postman
+**Example:** 100 users, 50GB storage, 10,000 requests/month ≈ **$1-2/month**

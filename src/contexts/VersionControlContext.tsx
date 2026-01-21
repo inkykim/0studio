@@ -105,6 +105,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [isGalleryMode, setIsGalleryMode] = useState(false);
   const [selectedCommitIds, setSelectedCommitIds] = useState<Set<string>>(new Set());
   const [isLoadingTree, setIsLoadingTree] = useState(false);
+  const [treeLoadPromise, setTreeLoadPromise] = useState<Promise<void> | null>(null);
   
   // Branching state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -324,8 +325,12 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
 
     // Load from tree.json first (primary source), then fall back to localStorage
     setIsLoadingTree(true);
-    loadTreeFile(path).then(treeData => {
-      if (treeData) {
+    
+    // Create a promise that we can await in createInitialCommit
+    const loadPromise = (async () => {
+      const treeData = await loadTreeFile(path);
+      
+      if (treeData && treeData.commits.length > 0) {
         // Loaded from tree.json
         console.log(`Loaded ${treeData.commits.length} commits and ${treeData.branches.length} branches from tree.json`);
         setBranches(treeData.branches);
@@ -333,54 +338,34 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         setActiveBranchId(treeData.activeBranchId);
         setCurrentCommitId(treeData.currentCommitId);
         setIsLoadingTree(false);
-      } else {
-        // Fall back to localStorage (for backwards compatibility)
-        loadCommitsFromStorage(path).then(({ commits: persistedCommits, branches: persistedBranches }) => {
-          // Load branches
-          if (persistedBranches.length > 0) {
-            setBranches(persistedBranches);
-            // Set active branch to main or first branch
-            const mainBranch = persistedBranches.find(b => b.isMain);
-            setActiveBranchId(mainBranch?.id || persistedBranches[0]?.id || null);
-          }
-          
-          if (persistedCommits.length > 0) {
-            console.log(`Found ${persistedCommits.length} persisted commits for file`);
-            // Only update if we don't already have commits (to avoid overwriting initial commit)
-            setCommits(prevCommits => {
-              // If we already have commits (e.g., from createInitialCommit), merge them
-              if (prevCommits.length > 0) {
-                // Merge: keep existing commits, add new ones that don't exist
-                const existingIds = new Set(prevCommits.map(c => c.id));
-                const newCommits = persistedCommits.filter(c => !existingIds.has(c.id));
-                const merged = [...prevCommits, ...newCommits].sort((a, b) => b.timestamp - a.timestamp);
-                console.log(`Merged commits: ${prevCommits.length} existing + ${newCommits.length} new = ${merged.length} total`);
-                return merged;
-              }
-              return persistedCommits;
-            });
-            
-            // Set current commit to the latest one
-            setCommits(prevCommits => {
-              if (prevCommits.length > 0) {
-                const latestCommit = prevCommits[0];
-                setCurrentCommitId(latestCommit.id);
-              }
-              return prevCommits;
-            });
-          } else {
-            // No persisted commits, but don't clear if we already have commits from createInitialCommit
-            setCommits(prevCommits => {
-              if (prevCommits.length === 0) {
-                setCurrentCommitId(null);
-              }
-              return prevCommits;
-            });
-          }
-          setIsLoadingTree(false);
-        });
+        return; // Successfully loaded from tree.json
       }
-    });
+      
+      // Fall back to localStorage (for backwards compatibility)
+      const { commits: persistedCommits, branches: persistedBranches } = await loadCommitsFromStorage(path);
+      
+      // Load branches
+      if (persistedBranches.length > 0) {
+        setBranches(persistedBranches);
+        // Set active branch to main or first branch
+        const mainBranch = persistedBranches.find(b => b.isMain);
+        setActiveBranchId(mainBranch?.id || persistedBranches[0]?.id || null);
+      }
+      
+      if (persistedCommits.length > 0) {
+        console.log(`Found ${persistedCommits.length} persisted commits for file from localStorage`);
+        setCommits(persistedCommits);
+        // Set current commit to the latest one
+        const latestCommit = persistedCommits[0];
+        if (latestCommit) {
+          setCurrentCommitId(latestCommit.id);
+        }
+      }
+      
+      setIsLoadingTree(false);
+    })();
+    
+    setTreeLoadPromise(loadPromise);
   }, [loadCommitsFromStorage, loadTreeFile]);
 
   const createInitialCommit = useCallback(async (modelData: LoadedModel, fileBuffer?: ArrayBuffer, filePath?: string) => {
@@ -389,6 +374,46 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     
     if (!targetPath) {
       console.warn('createInitialCommit called without filePath and currentModel is not set');
+      return;
+    }
+
+    // Wait for tree loading to complete before creating initial commit
+    // This prevents race conditions where we create a duplicate initial commit
+    if (treeLoadPromise) {
+      console.log('Waiting for tree.json to finish loading before creating initial commit...');
+      try {
+        await treeLoadPromise;
+        console.log('Tree loading complete, checking if initial commit is needed...');
+      } catch (error) {
+        console.warn('Tree loading failed, will proceed with initial commit creation:', error);
+      }
+    }
+
+    // Use a Promise to get the current commits count from within the setState callback
+    // This ensures we check the actual current state, not a stale closure value
+    const currentCommitsCount = await new Promise<number>(resolve => {
+      setCommits(prevCommits => {
+        resolve(prevCommits.length);
+        return prevCommits;
+      });
+    });
+
+    // If we have commits from tree.json, don't create a new initial commit
+    if (currentCommitsCount > 0) {
+      console.log(`Skipping initial commit creation - ${currentCommitsCount} commits already exist from tree.json`);
+      // Update the modelData for the current commit (so we have it for display)
+      setCommits(prevCommits => {
+        if (prevCommits.length > 0) {
+          return prevCommits.map((c, idx) => {
+            // Update the first commit (current head) with the modelData if it doesn't have one
+            if (idx === 0 && !c.modelData) {
+              return { ...c, modelData, fileBuffer };
+            }
+            return c;
+          });
+        }
+        return prevCommits;
+      });
       return;
     }
 
@@ -407,52 +432,47 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
       return prevBranches;
     });
-    setActiveBranchId(mainBranchId);
+    setActiveBranchId(prev => prev || mainBranchId);
 
-    setCommits(prevCommits => {
-      if (prevCommits.length === 0) {
-        // Generate a unique commit ID with timestamp and random component
-        const commitId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        
-        const initialCommit: ModelCommit = {
-          id: commitId,
-          message: "Initial model import",
-          timestamp: Date.now(),
-          modelData: modelData,
-          fileBuffer: fileBuffer, // Store file buffer if provided
-          parentCommitId: null, // Root commit has no parent
-          branchId: mainBranchId,
-        };
-        setCurrentCommitId(initialCommit.id);
-        console.log("Created initial commit:", initialCommit.id, fileBuffer ? `with ${fileBuffer.byteLength} byte file buffer` : 'without file buffer');
-        const updated = [initialCommit];
-        
-        // Update branch head
-        setBranches(prevBranches => {
-          const updatedBranches = prevBranches.map(b => 
-            b.id === mainBranchId ? { ...b, headCommitId: commitId } : b
-          );
-          // Save both commits and branches
-          saveCommitsToStorage(targetPath, updated, updatedBranches);
-          return updatedBranches;
-        });
-        
-        // Save file to 0studio folder (file system storage) - await this properly
-        if (fileBuffer && desktopAPI.isDesktop) {
-          desktopAPI.saveCommitFile(targetPath, initialCommit.id, fileBuffer)
-            .then(() => {
-              console.log(`Successfully saved initial commit file: commit-${initialCommit.id}.3dm`);
-            })
-            .catch(err => {
-              console.error('Failed to save commit file to 0studio folder:', err);
-            });
-        }
-        
-        return updated;
-      }
-      return prevCommits;
+    // Generate a unique commit ID with timestamp and random component
+    const commitId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const initialCommit: ModelCommit = {
+      id: commitId,
+      message: "Initial model import",
+      timestamp: Date.now(),
+      modelData: modelData,
+      fileBuffer: fileBuffer, // Store file buffer if provided
+      parentCommitId: null, // Root commit has no parent
+      branchId: mainBranchId,
+    };
+    
+    setCurrentCommitId(initialCommit.id);
+    console.log("Created initial commit:", initialCommit.id, fileBuffer ? `with ${fileBuffer.byteLength} byte file buffer` : 'without file buffer');
+    
+    const updated = [initialCommit];
+    setCommits(updated);
+    
+    // Update branch head
+    setBranches(prevBranches => {
+      const updatedBranches = prevBranches.map(b => 
+        b.id === mainBranchId ? { ...b, headCommitId: commitId } : b
+      );
+      // Save both commits and branches
+      saveCommitsToStorage(targetPath, updated, updatedBranches);
+      return updatedBranches;
     });
-  }, [currentModel, saveCommitsToStorage, saveTreeFile]);
+    
+    // Save file to 0studio folder (file system storage)
+    if (fileBuffer && desktopAPI.isDesktop) {
+      try {
+        await desktopAPI.saveCommitFile(targetPath, initialCommit.id, fileBuffer);
+        console.log(`Successfully saved initial commit file: commit-${initialCommit.id}.3dm`);
+      } catch (err) {
+        console.error('Failed to save commit file to 0studio folder:', err);
+      }
+    }
+  }, [currentModel, saveCommitsToStorage, saveTreeFile, treeLoadPromise]);
 
   // Auto-save tree.json whenever branches, commits, activeBranchId, or currentCommitId change
   // Skip saving during initial load (when commits/branches are being loaded)
@@ -877,6 +897,9 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setBranches([]);
     setActiveBranchId(null);
     setPulledCommitId(null);
+    // Reset tree loading state
+    setTreeLoadPromise(null);
+    setIsLoadingTree(false);
   }, [currentModel, branches, commits, saveTreeFile]);
 
   // Handle project-closed event from Electron

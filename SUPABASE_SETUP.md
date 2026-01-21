@@ -28,28 +28,67 @@ VITE_AWS_API_URL=http://localhost:3000/api/aws  # Optional, for backend API
 Run the following SQL in your Supabase SQL Editor:
 
 ```sql
--- 1. Projects: Each row is ONE file location
-create table projects (
+-- ============================================================
+-- CORE TABLES - Projects, Models, Model Versions
+-- ============================================================
+
+-- 1. Projects: Each row is ONE project/workspace
+create table if not exists projects (
   id uuid default gen_random_uuid() primary key,
+  owner_id uuid references auth.users(id) not null,
+  org_id uuid null, -- For enterprise team projects
   name text not null,
-  s3_key text not null, -- e.g. "org_123/proj_456/main.obj"
-  owner_id uuid references auth.users(id),
   created_at timestamptz default now()
 );
 
--- 2. Commits: Each row is ONE file version
-create table commits (
+-- 2. Models: Each row is ONE model file within a project
+create table if not exists models (
+  id uuid default gen_random_uuid() primary key,
+  project_id uuid references projects(id) on delete cascade not null,
+  name text not null,
+  created_at timestamptz default now()
+);
+
+-- 3. Model Versions: Explicit versioning (v1, v2, v3...)
+-- Each version is stored as a separate S3 object
+-- S3 key format: users/{user_id}/projects/{project_id}/models/{model_id}/versions/{version_name}-{original_file_name}
+create table if not exists model_versions (
+  id uuid default gen_random_uuid() primary key,
+  model_id uuid references models(id) on delete cascade not null,
+  s3_key text not null,
+  version_name text not null, -- e.g., "v1", "v2", "v12"
+  file_size bigint default 0,
+  uploaded_by uuid references auth.users(id) not null,
+  is_current boolean default true,
+  created_at timestamptz default now()
+);
+
+-- 4. Project Members: Team-based access control (enterprise feature)
+create table if not exists project_members (
+  project_id uuid references projects(id) on delete cascade not null,
+  user_id uuid references auth.users(id) not null,
+  role text not null default 'viewer', -- 'owner', 'editor', 'viewer'
+  created_at timestamptz default now(),
+  primary key (project_id, user_id)
+);
+
+-- ============================================================
+-- LEGACY TABLES - Commits and Branches (for local version control)
+-- ============================================================
+
+-- 5. Commits: Each row is ONE file version (legacy, for local VC)
+create table if not exists commits (
   id uuid default gen_random_uuid() primary key,
   project_id uuid references projects(id) on delete cascade,
   parent_commit_id uuid references commits(id),
   message text,
   author_id uuid references auth.users(id),
-  s3_version_id text not null, -- The AWS Version ID
+  s3_version_id text not null, -- The AWS Version ID (legacy)
   created_at timestamptz default now()
 );
 
--- 3. Branches: Pointers to specific commits
-create table branches (
+-- 6. Branches: Pointers to specific commits
+create table if not exists branches (
   id uuid default gen_random_uuid() primary key,
   project_id uuid references projects(id) on delete cascade,
   name text not null,
@@ -57,15 +96,39 @@ create table branches (
   unique (project_id, name)
 );
 
--- Enable Row Level Security (RLS)
+-- ============================================================
+-- INDEXES for better query performance
+-- ============================================================
+create index if not exists idx_models_project_id on models(project_id);
+create index if not exists idx_model_versions_model_id on model_versions(model_id);
+create index if not exists idx_model_versions_is_current on model_versions(is_current);
+create index if not exists idx_project_members_user_id on project_members(user_id);
+
+-- ============================================================
+-- ROW LEVEL SECURITY (RLS)
+-- ============================================================
 alter table projects enable row level security;
+alter table models enable row level security;
+alter table model_versions enable row level security;
+alter table project_members enable row level security;
 alter table commits enable row level security;
 alter table branches enable row level security;
 
--- Policies: Users can only access their own projects
+-- ============================================================
+-- POLICIES: Projects
+-- Users can access their own projects OR projects they are members of
+-- ============================================================
+
 create policy "Users can view their own projects"
   on projects for select
-  using (auth.uid() = owner_id);
+  using (
+    auth.uid() = owner_id 
+    OR exists (
+      select 1 from project_members
+      where project_members.project_id = projects.id
+      and project_members.user_id = auth.uid()
+    )
+  );
 
 create policy "Users can create their own projects"
   on projects for insert
@@ -79,7 +142,187 @@ create policy "Users can delete their own projects"
   on projects for delete
   using (auth.uid() = owner_id);
 
--- Commits: Users can access commits for their projects
+-- ============================================================
+-- POLICIES: Models
+-- Users can access models for projects they have access to
+-- ============================================================
+
+create policy "Users can view models for their projects"
+  on models for select
+  using (
+    exists (
+      select 1 from projects
+      where projects.id = models.project_id
+      and (
+        projects.owner_id = auth.uid()
+        OR exists (
+          select 1 from project_members
+          where project_members.project_id = projects.id
+          and project_members.user_id = auth.uid()
+        )
+      )
+    )
+  );
+
+create policy "Users can create models for their projects"
+  on models for insert
+  with check (
+    exists (
+      select 1 from projects
+      where projects.id = models.project_id
+      and (
+        projects.owner_id = auth.uid()
+        OR exists (
+          select 1 from project_members
+          where project_members.project_id = projects.id
+          and project_members.user_id = auth.uid()
+          and project_members.role in ('owner', 'editor')
+        )
+      )
+    )
+  );
+
+create policy "Users can update models for their projects"
+  on models for update
+  using (
+    exists (
+      select 1 from projects
+      where projects.id = models.project_id
+      and (
+        projects.owner_id = auth.uid()
+        OR exists (
+          select 1 from project_members
+          where project_members.project_id = projects.id
+          and project_members.user_id = auth.uid()
+          and project_members.role in ('owner', 'editor')
+        )
+      )
+    )
+  );
+
+create policy "Users can delete models for their projects"
+  on models for delete
+  using (
+    exists (
+      select 1 from projects
+      where projects.id = models.project_id
+      and projects.owner_id = auth.uid()
+    )
+  );
+
+-- ============================================================
+-- POLICIES: Model Versions
+-- Users can access versions for models they have access to
+-- ============================================================
+
+create policy "Users can view versions for their models"
+  on model_versions for select
+  using (
+    exists (
+      select 1 from models
+      join projects on projects.id = models.project_id
+      where models.id = model_versions.model_id
+      and (
+        projects.owner_id = auth.uid()
+        OR exists (
+          select 1 from project_members
+          where project_members.project_id = projects.id
+          and project_members.user_id = auth.uid()
+        )
+      )
+    )
+  );
+
+create policy "Users can create versions for their models"
+  on model_versions for insert
+  with check (
+    exists (
+      select 1 from models
+      join projects on projects.id = models.project_id
+      where models.id = model_versions.model_id
+      and (
+        projects.owner_id = auth.uid()
+        OR exists (
+          select 1 from project_members
+          where project_members.project_id = projects.id
+          and project_members.user_id = auth.uid()
+          and project_members.role in ('owner', 'editor')
+        )
+      )
+    )
+  );
+
+create policy "Users can update versions for their models"
+  on model_versions for update
+  using (
+    exists (
+      select 1 from models
+      join projects on projects.id = models.project_id
+      where models.id = model_versions.model_id
+      and (
+        projects.owner_id = auth.uid()
+        OR exists (
+          select 1 from project_members
+          where project_members.project_id = projects.id
+          and project_members.user_id = auth.uid()
+          and project_members.role in ('owner', 'editor')
+        )
+      )
+    )
+  );
+
+-- ============================================================
+-- POLICIES: Project Members (Enterprise feature)
+-- Only project owners can manage members
+-- ============================================================
+
+create policy "Users can view members for their projects"
+  on project_members for select
+  using (
+    exists (
+      select 1 from projects
+      where projects.id = project_members.project_id
+      and (
+        projects.owner_id = auth.uid()
+        OR project_members.user_id = auth.uid()
+      )
+    )
+  );
+
+create policy "Owners can add members to their projects"
+  on project_members for insert
+  with check (
+    exists (
+      select 1 from projects
+      where projects.id = project_members.project_id
+      and projects.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners can update members in their projects"
+  on project_members for update
+  using (
+    exists (
+      select 1 from projects
+      where projects.id = project_members.project_id
+      and projects.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners can remove members from their projects"
+  on project_members for delete
+  using (
+    exists (
+      select 1 from projects
+      where projects.id = project_members.project_id
+      and projects.owner_id = auth.uid()
+    )
+  );
+
+-- ============================================================
+-- POLICIES: Commits (Legacy)
+-- ============================================================
+
 create policy "Users can view commits for their projects"
   on commits for select
   using (
@@ -100,7 +343,10 @@ create policy "Users can create commits for their projects"
     )
   );
 
--- Branches: Users can access branches for their projects
+-- ============================================================
+-- POLICIES: Branches (Legacy)
+-- ============================================================
+
 create policy "Users can view branches for their projects"
   on branches for select
   using (
