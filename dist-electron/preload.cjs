@@ -27,6 +27,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     readCommitFile: (filePath, commitId) => electron_1.ipcRenderer.invoke('read-commit-file', filePath, commitId),
     listCommitFiles: (filePath) => electron_1.ipcRenderer.invoke('list-commit-files', filePath),
     commitFileExists: (filePath, commitId) => electron_1.ipcRenderer.invoke('commit-file-exists', filePath, commitId),
+    saveTreeFile: (filePath, treeData) => electron_1.ipcRenderer.invoke('save-tree-file', filePath, treeData),
+    loadTreeFile: (filePath) => electron_1.ipcRenderer.invoke('load-tree-file', filePath),
+    validateCommitFiles: (filePath, commitIds) => electron_1.ipcRenderer.invoke('validate-commit-files', filePath, commitIds),
     // Event listeners
     onProjectOpened: (callback) => {
         electron_1.ipcRenderer.on('project-opened', (_, project) => callback(project));

@@ -450,18 +450,22 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setCurrentCommitId(initialCommit.id);
     console.log("Created initial commit:", initialCommit.id, fileBuffer ? `with ${fileBuffer.byteLength} byte file buffer` : 'without file buffer');
     
-    const updated = [initialCommit];
-    setCommits(updated);
+    const updatedCommits = [initialCommit];
+    setCommits(updatedCommits);
     
-    // Update branch head
-    setBranches(prevBranches => {
-      const updatedBranches = prevBranches.map(b => 
-        b.id === mainBranchId ? { ...b, headCommitId: commitId } : b
-      );
-      // Save both commits and branches
-      saveCommitsToStorage(targetPath, updated, updatedBranches);
-      return updatedBranches;
-    });
+    // Create the updated branch with the new headCommitId
+    const mainBranch: Branch = {
+      id: mainBranchId,
+      name: 'main',
+      headCommitId: commitId,
+      color: BRANCH_COLORS[0],
+      isMain: true,
+    };
+    const updatedBranches = [mainBranch];
+    setBranches(updatedBranches);
+    
+    // Save to localStorage as backup
+    saveCommitsToStorage(targetPath, updatedCommits, updatedBranches);
     
     // Save file to 0studio folder (file system storage)
     if (fileBuffer && desktopAPI.isDesktop) {
@@ -472,7 +476,39 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         console.error('Failed to save commit file to 0studio folder:', err);
       }
     }
-  }, [currentModel, saveCommitsToStorage, saveTreeFile, treeLoadPromise]);
+    
+    // Explicitly save tree.json after initial commit (don't rely on useEffect which may be skipped during loading)
+    if (desktopAPI.isDesktop) {
+      try {
+        const treeData = {
+          version: '1.0',
+          activeBranchId: mainBranchId,
+          currentCommitId: commitId,
+          branches: updatedBranches.map(b => ({
+            id: b.id,
+            name: b.name,
+            headCommitId: b.headCommitId,
+            color: b.color,
+            isMain: b.isMain,
+            parentBranchId: b.parentBranchId,
+            originCommitId: b.originCommitId,
+          })),
+          commits: updatedCommits.map(c => ({
+            id: c.id,
+            message: c.message,
+            timestamp: c.timestamp,
+            parentCommitId: c.parentCommitId,
+            branchId: c.branchId,
+            starred: c.starred || false,
+          })),
+        };
+        await desktopAPI.saveTreeFile(targetPath, treeData);
+        console.log(`Successfully saved tree.json for initial commit`);
+      } catch (err) {
+        console.error('Failed to save tree.json for initial commit:', err);
+      }
+    }
+  }, [currentModel, saveCommitsToStorage, treeLoadPromise]);
 
   // Auto-save tree.json whenever branches, commits, activeBranchId, or currentCommitId change
   // Skip saving during initial load (when commits/branches are being loaded)

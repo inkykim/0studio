@@ -190,6 +190,9 @@ class RhinoStudio {
         ipcMain.handle('read-commit-file', (_, filePath, commitId) => this.readCommitFile(filePath, commitId));
         ipcMain.handle('list-commit-files', (_, filePath) => this.listCommitFiles(filePath));
         ipcMain.handle('commit-file-exists', (_, filePath, commitId) => this.commitFileExists(filePath, commitId));
+        ipcMain.handle('save-tree-file', (_, filePath, treeData) => this.saveTreeFile(filePath, treeData));
+        ipcMain.handle('load-tree-file', (_, filePath) => this.loadTreeFile(filePath));
+        ipcMain.handle('validate-commit-files', (_, filePath, commitIds) => this.validateCommitFiles(filePath, commitIds));
     }
     async openProjectDialog() {
         const result = await dialog.showOpenDialog(this.mainWindow, {
@@ -283,6 +286,16 @@ class RhinoStudio {
     }
     commitFileExists(filePath, commitId) {
         return this.fileStorage.commitFileExists(filePath, commitId);
+    }
+    // Tree file methods
+    async saveTreeFile(filePath, treeData) {
+        await this.fileStorage.saveTreeFile(filePath, treeData);
+    }
+    async loadTreeFile(filePath) {
+        return await this.fileStorage.loadTreeFile(filePath);
+    }
+    validateCommitFiles(filePath, commitIds) {
+        return this.fileStorage.validateCommitFiles(filePath, commitIds);
     }
     async saveModelVersion() {
         if (!this.currentProjectFile) {

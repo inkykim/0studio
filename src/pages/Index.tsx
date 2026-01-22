@@ -1,7 +1,6 @@
 import { TitleBar } from "@/components/TitleBar";
 import { VersionControl } from "@/components/VersionControl";
 import { ModelViewer } from "@/components/ModelViewer";
-// import { CopilotChat } from "@/components/CopilotChat"; // Commented out for later use
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { ModelProvider } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
@@ -28,12 +27,6 @@ const Index = () => {
               <ResizablePanel defaultSize={70} minSize={55}>
                 <ModelViewer />
               </ResizablePanel>
-
-              {/* Copilot Chat Panel - Commented out for later use */}
-              {/* <ResizableHandle className="w-1 bg-transparent hover:bg-primary/20 transition-colors" />
-              <ResizablePanel defaultSize={22} minSize={18} maxSize={35}>
-                <CopilotChat />
-              </ResizablePanel> */}
             </ResizablePanelGroup>
           </div>
         </div>

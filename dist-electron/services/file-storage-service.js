@@ -3,7 +3,8 @@ import { existsSync, readdirSync } from 'fs';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 /**
  * Service for managing 0studio commit storage folders
- * Creates a folder next to the .3dm file and stores commit versions there
+ * Creates a 0studio_{project-name} folder in the same directory as the .3dm file
+ * to store commit versions and tree.json
  */
 export class FileStorageService {
     /**
@@ -14,6 +15,7 @@ export class FileStorageService {
     getStorageFolderPath(filePath) {
         const dir = dirname(filePath);
         const fileName = basename(filePath, extname(filePath));
+        // Create structure: /path/to/0studio_{filename}/
         return join(dir, `0studio_${fileName}`);
     }
     /**
@@ -97,5 +99,65 @@ export class FileStorageService {
     commitFileExists(filePath, commitId) {
         const commitFilePath = this.getCommitFilePath(filePath, commitId);
         return existsSync(commitFilePath);
+    }
+    /**
+     * Get the tree.json file path
+     * @param filePath Path to the .3dm file
+     * @returns Path to the tree.json file
+     */
+    getTreeFilePath(filePath) {
+        const folderPath = this.getStorageFolderPath(filePath);
+        return join(folderPath, 'tree.json');
+    }
+    /**
+     * Save the commit tree structure to tree.json
+     * @param filePath Path to the .3dm file
+     * @param treeData Tree data structure with branches and commits
+     */
+    async saveTreeFile(filePath, treeData) {
+        // Ensure the storage folder exists (same folder as commit files)
+        await this.ensureStorageFolder(filePath);
+        const treeFilePath = this.getTreeFilePath(filePath);
+        const jsonContent = JSON.stringify(treeData, null, 2); // Pretty print for debugging
+        await writeFile(treeFilePath, jsonContent, 'utf-8');
+        console.log(`Saved tree.json to commit storage folder: ${treeFilePath}`);
+    }
+    /**
+     * Load the commit tree structure from tree.json
+     * @param filePath Path to the .3dm file
+     * @returns Tree data or null if file doesn't exist
+     */
+    async loadTreeFile(filePath) {
+        const treeFilePath = this.getTreeFilePath(filePath);
+        if (!existsSync(treeFilePath)) {
+            console.log(`tree.json not found: ${treeFilePath}`);
+            return null;
+        }
+        try {
+            const content = await readFile(treeFilePath, 'utf-8');
+            const treeData = JSON.parse(content);
+            console.log(`Loaded tree.json: ${treeFilePath}`);
+            return treeData;
+        }
+        catch (error) {
+            console.error(`Failed to parse tree.json: ${treeFilePath}`, error);
+            return null;
+        }
+    }
+    /**
+     * Validate that all commit files referenced in tree.json exist
+     * @param filePath Path to the .3dm file
+     * @param commitIds Array of commit IDs to validate
+     * @returns Array of missing commit IDs
+     */
+    validateCommitFiles(filePath, commitIds) {
+        const missing = [];
+        for (const commitId of commitIds) {
+            if (!this.commitFileExists(filePath, commitId)) {
+                missing.push(commitId);
+                console.warn(`⚠️ Commit file missing: commit-${commitId}.3dm`);
+            }
+        }
+        return missing;
     }
 }

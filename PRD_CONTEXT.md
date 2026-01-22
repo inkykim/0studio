@@ -1,7 +1,7 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2026-01-21  
-**Version:** 1.1.0  
+**Last Updated:** 2026-01-22  
+**Version:** 1.2.0  
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -17,7 +17,8 @@
 7. [API Contracts & Interfaces](#api-contracts--interfaces)
 8. [Development Guidelines](#development-guidelines)
 9. [Key Workflows](#key-workflows)
-10. [Recent Updates & Features](#recent-updates--features)
+10. [Implementation Gaps & Known Issues](#implementation-gaps--known-issues)
+11. [Recent Updates & Features](#recent-updates--features)
 
 ---
 
@@ -48,7 +49,7 @@
 - **Cloud Storage**: AWS S3 with versioning
 - **Authentication**: Supabase Auth
 - **Payments**: Stripe subscriptions
-- **AI Integration**: Google Gemini API
+- **AI Integration**: Google Gemini API (for AI-powered commits)
 
 ---
 
@@ -93,13 +94,6 @@
 │  │  │ ModelViewer  │  │ Rhino3dm     │  │  Scene      │ │  │
 │  │  │  Component   │  │  Service     │  │  Commands   │ │  │
 │  │  └──────────────┘  └──────────────┘  └─────────────┘ │  │
-│  └────────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │              AI Integration Layer                        │  │
-│  │  ┌──────────────┐                                       │  │
-│  │  │  Gemini      │                                       │  │
-│  │  │  Service     │                                       │  │
-│  │  └──────────────┘                                       │  │
 │  └────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │         Authentication & Cloud Storage Layer             │  │
@@ -186,9 +180,10 @@
 │   ├── main.ts           # Main Electron process entry point
 │   ├── preload.ts        # Preload script (context bridge)
 │   ├── services/         # Electron services
-│   │   ├── file-watcher.ts    # File system watching
-│   │   ├── git-service.ts     # Git operations
-│   │   └── project-service.ts # Project management
+│   │   ├── file-storage-service.ts  # 0studio commit storage
+│   │   ├── file-watcher.ts          # File system watching
+│   │   ├── git-service.ts           # Git operations (not connected to IPC)
+│   │   └── project-service.ts       # Project management
 │   └── tsconfig.json     # TypeScript config for Electron
 │
 ├── src/                  # React application source
@@ -197,10 +192,11 @@
 │   │
 │   ├── components/      # React components
 │   │   ├── ModelViewer.tsx      # 3D model viewer with gallery mode
-│   │   ├── VersionControl.tsx   # Version control UI
-│   │   ├── Auth.tsx            # Authentication UI
-│   │   ├── TitleBar.tsx        # macOS title bar with user menu
-│   │   └── ui/                 # Shadcn UI components
+│   │   ├── VersionControl.tsx   # Version control UI with branching tree
+│   │   ├── NavLink.tsx          # Navigation link component
+│   │   ├── Auth.tsx             # Authentication UI (AuthDialog, UserMenu)
+│   │   ├── TitleBar.tsx         # macOS title bar with user menu
+│   │   └── ui/                  # Shadcn UI components
 │   │
 │   ├── contexts/        # React contexts (state management)
 │   │   ├── ModelContext.tsx           # 3D model state
@@ -260,7 +256,7 @@
 
 **`electron/services/file-storage-service.ts`**
 - Manages local file storage for commit versions
-- Creates `0studio/{filename}/` folder structure
+- Creates `0studio_{filename}/` folder structure
 - Stores commit files as `commit-{commitId}.3dm`
 - Stores branch/commit tree in `tree.json` (same folder as commits)
 - Provides: saveCommitFile, readCommitFile, listCommitFiles, saveTreeFile, loadTreeFile, validateCommitFiles
@@ -279,9 +275,9 @@
 - Renders routing with React Router
 
 **`src/pages/Index.tsx`**
-- Main application layout
-- Resizable panels: VersionControl | ModelViewer
-- Wraps app in ModelProvider and VersionControlProvider
+- Main application layout with macOS-style title bar
+- Resizable panels: VersionControl (30%) | ModelViewer (70%)
+- Wraps content in VersionControlProvider → ModelProvider (order matters!)
 
 **`src/contexts/ModelContext.tsx`**
 - Manages 3D model state and operations
@@ -298,7 +294,7 @@
 - Manages gallery mode state (selection, toggle)
 - Coordinates with ModelContext via callbacks
 - Handles cloud sync with Supabase and S3
-- **Local Persistence**: Loads/saves `tree.json` from `0studio/{filename}/` folder
+- **Local Persistence**: Loads/saves `tree.json` from `0studio_{filename}/` folder
   - Loads on `setCurrentModel()` (primary source, falls back to localStorage)
   - Auto-saves on any commit/branch change via `useEffect`
   - Validates commit files exist, warns about missing files
@@ -314,13 +310,14 @@
 **`src/lib/desktop-api.ts`**
 - Singleton service wrapping Electron IPC
 - Provides type-safe API for:
-  - Project management (open, close, get current)
-  - Git operations (init, status, commit, log, checkout, push, pull)
-  - File watching (start, stop, set current file)
+  - Project management (openProjectDialog, getCurrentProject, closeProject)
+  - File watching (startFileWatching, stopFileWatching, setCurrentFile)
   - File reading/writing (readFileBuffer, writeFileBuffer)
   - **Local commit storage**: saveCommitFile, readCommitFile, listCommitFiles, commitFileExists
   - **Tree persistence**: saveTreeFile, loadTreeFile, validateCommitFiles
-- Event listeners for IPC events
+  - Git operations (gitInit, gitStatus, gitCommit, gitLog, gitCheckout, gitPush, gitPull) - ⚠️ Exposed but handlers NOT implemented in main.ts
+- Event listeners for IPC events (onProjectOpened, onProjectClosed, onFileChanged, onShowCommitDialog, onGitOperationComplete)
+- `isDesktop` property to check if running in Electron
 
 **`src/lib/rhino3dm-service.ts`**
 - Loads .3dm files using Three.js Rhino3dmLoader
@@ -331,9 +328,7 @@
 
 **`src/lib/gemini-service.ts`**
 - Integrates with Google Gemini API
-- Two main functions:
-  - `sendMessage()`: Chat interface for 3D modeling assistance
-  - `interpretCommitMessage()`: Converts commit messages to scene commands
+- Main function: `interpretCommitMessage()` converts commit messages to scene commands
 - System prompts define AI capabilities and command format
 - Returns JSON commands that can be executed
 
@@ -342,6 +337,7 @@
 - Methods for projects, commits, and branches CRUD operations
 - Handles error reporting via toast notifications
 - Singleton instance exported as `supabaseAPI`
+- ⚠️ **Note**: Complete and functional, but NOT currently called from VersionControlContext
 
 **`src/lib/aws-api.ts`**
 - AWS S3 API service (via backend API)
@@ -349,28 +345,39 @@
 - File upload/download with version ID tracking
 - S3 key generation helpers
 - Singleton instance exported as `awsS3API`
+- ⚠️ **Note**: Complete and functional, but NOT currently called from VersionControlContext
 
 **`src/components/ModelViewer.tsx`**
 - React Three Fiber canvas for 3D rendering
-- Displays loaded .3dm models
-- Renders generated primitives
-- Provides camera controls and lighting
-- **Gallery Mode**: Adaptive grid layouts for comparing multiple versions
-  - 2 models: Side by side
+- Displays loaded .3dm models with automatic centering and camera fitting
+- Renders generated primitives (AI-created objects)
+- Provides OrbitControls for camera manipulation (rotate, zoom, pan)
+- Multi-directional lighting setup (ambient, directional, hemisphere)
+- Adaptive grid floor that scales based on model size
+- Scene stats overlay (curves, surfaces, polysurfaces count)
+- Drag-and-drop file import support
+- Empty state with file picker button
+- Loading and error states
+- **Gallery Mode**: Adaptive grid layouts for comparing multiple commits
+  - 1 model: Full view
+  - 2 models: Side by side (2 columns)
   - 3 models: 2 on top, 1 full-width on bottom
   - 4 models: 2x2 grid
-- Integrates with ModelContext
+- Each gallery viewport has independent orbit controls
+- Integrates with ModelContext and VersionControlContext
 
 **`src/components/VersionControl.tsx`**
 - UI for version control operations
-- Shows commit history, current commit, unsaved changes
-- Commit dialog with AI option
-- Restore to commit functionality
+- **BranchingTree**: SVG-based visual tree with colored branch lines and commit nodes
+- Shows commit history with version labels, current commit, unsaved changes indicator
+- Commit input with AI option (🤖 checkbox) and custom branch name support
+- Pull (Download) and Restore buttons for each commit
 - **Gallery Mode Toggle**: Button to enter/exit gallery mode
 - **Commit Selection**: Checkboxes to select commits for gallery (max 4)
-- Search and filter commits
+- **Branch Selector**: Dropdown to switch between branches when multiple exist
+- **Keep Button**: Mark current branch as main
 - Star/unstar commits
-- Integrates with VersionControlContext
+- Integrates with VersionControlContext and ModelContext
 
 **`src/components/Auth.tsx`**
 - Authentication UI components
@@ -395,7 +402,7 @@
 - Hook for cloud pull operations with payment plan validation
 - Checks if user has verified payment plan before allowing pulls
 - Shows error toast with dashboard link if plan is missing
-- Wraps desktopAPI.gitPull() with permission checks
+- **⚠️ Note**: This hook references `pullFromCloud` and `isCloudEnabled` from VersionControlContext, but these methods/state are NOT currently implemented. The hook exists for future cloud integration.
 
 **`src/lib/scene-commands.ts`**
 - Defines command types: create, transform, color, delete, clear
@@ -407,7 +414,7 @@
 - IndexedDB storage for commit file buffers (legacy, used as fallback)
 - Stores large file buffers separately from localStorage
 - Provides: storeFileBuffer, getFileBuffer
-- **Note**: Primary storage is now local file system (`0studio/{filename}/` folder)
+- **Note**: Primary storage is now local file system (`0studio_{filename}/` folder)
 
 ---
 
@@ -446,6 +453,7 @@
 
 **Key State**:
 - `currentModel`: Path to current model file
+- `modelName`: Filename of current model
 - `commits`: Array of ModelCommit objects
 - `currentCommitId`: ID of currently active commit
 - `hasUnsavedChanges`: Whether model has uncommitted changes
@@ -455,29 +463,29 @@
 - `pulledCommitId`: ID of commit that was last pulled/downloaded (for highlighting)
 - `isGalleryMode`: Whether gallery mode is active
 - `selectedCommitIds`: Set of commit IDs selected for gallery (max 4)
-- `isCloudEnabled`: Whether cloud sync is enabled
-- `currentProjectId`: Supabase project ID
-- `isLoadingTree`: Whether tree.json is currently being loaded
-- `treeLoadPromise`: Promise that resolves when tree.json loading completes (for race condition prevention)
+- `isLoadingTree`: Whether tree.json is currently being loaded (internal)
+- `treeLoadPromise`: Promise that resolves when tree.json loading completes (internal, for race condition prevention)
 
 **Key Methods**:
 - `setCurrentModel(path)`: Set current model, loads tree.json and creates treeLoadPromise
 - `commitModelChanges(message, modelData, customBranchName?)`: Create regular commit (auto-branches when committing from non-head)
 - `commitWithAI(message)`: Create AI-powered commit
-- `restoreToCommit(commitId)`: Restore model to specific commit
-- `pullFromCommit(commitId)`: Pull commit to local file (updates disk, sets pulledCommitId)
-- `createInitialCommit(modelData)`: Create first commit and main branch (awaits treeLoadPromise first)
+- `restoreToCommit(commitId)`: Restore model to specific commit (UI only, doesn't update disk)
+- `pullFromCommit(commitId)`: Pull commit to local file (updates disk, sets pulledCommitId for branch tracking)
+- `createInitialCommit(modelData, fileBuffer?, filePath?)`: Create first commit and main branch (awaits treeLoadPromise first)
 - `markUnsavedChanges()` / `clearUnsavedChanges()`: Track changes
 - `clearCurrentModel()`: Clear model, reset gallery mode, branches, and tree loading state
 - `toggleGalleryMode()`: Enter/exit gallery mode
 - `toggleCommitSelection(commitId)`: Select/deselect commit for gallery (max 4)
 - `clearSelectedCommits()`: Clear all selections
-- `pullFromCloud()`: Pull commits from cloud storage
 - `toggleStarCommit(commitId)`: Star/unstar a commit
+- `getStarredCommits()`: Get all starred commits
 - `switchBranch(branchId)`: Switch to a different branch
 - `keepBranch(branchId)`: Mark a branch as the main branch
 - `getBranchCommits(branchId)`: Get all commits for a specific branch
 - `getCommitVersionLabel(commit)`: Get version label (v1, v2, v3a, v3b, etc.)
+- `setModelRestoreCallback(callback)`: Set callback for restoring model from commit
+- `setAICommitCallback(callback)`: Set callback for AI commit execution
 
 **Branching Logic**:
 - When `pullFromCommit` is called, `pulledCommitId` is set to track the pulled commit
@@ -487,12 +495,14 @@
 - Users can switch between branches and mark any branch as "main"
 
 **Integration Points**:
-- Listens to file changes to mark unsaved changes
+- Listens to file changes (via desktopAPI) to mark unsaved changes
 - Listens to project-closed events to reset gallery mode and branches
-- Uses callbacks to ModelContext for restoration
-- Uses callback to execute AI commands (set by component)
-- Integrates with Supabase for cloud commits
-- Integrates with AWS S3 for file storage
+- Uses callbacks to ModelContext for model restoration (`onModelRestore`)
+- Uses callback to execute AI commands (`onAICommit`, set by component)
+- Uses FileStorageService (via desktopAPI) for local commit file storage
+- Uses tree.json for persisting branch/commit metadata
+
+**Note**: Cloud storage integration (Supabase + AWS S3) is NOT currently implemented in VersionControlContext. The backend API and service files exist for future integration, but the frontend context only handles local storage via the `0studio_{filename}/` folder structure.
 
 ### AuthContext
 
@@ -523,19 +533,20 @@
 
 **Key Methods**:
 - Project: `openProjectDialog()`, `getCurrentProject()`, `closeProject()`
-- Git: `gitInit()`, `gitStatus()`, `gitCommit()`, `gitLog()`, `gitCheckout()`, `gitPush()`, `gitPull()`
 - File Watching: `startFileWatching()`, `stopFileWatching()`, `setCurrentFile()`
 - File Reading: `readFileBuffer(filePath)`, `writeFileBuffer(filePath, buffer)`
-- Events: `onProjectOpened()`, `onProjectClosed()`, `onFileChanged()`
+- Commit Storage: `saveCommitFile()`, `readCommitFile()`, `listCommitFiles()`, `commitFileExists()`
+- Tree Persistence: `saveTreeFile()`, `loadTreeFile()`, `validateCommitFiles()`
+- Events: `onProjectOpened()`, `onProjectClosed()`, `onFileChanged()`, `onShowCommitDialog()`, `onGitOperationComplete()`
+- Git (exposed but NOT implemented): `gitInit()`, `gitStatus()`, `gitCommit()`, `gitLog()`, `gitCheckout()`, `gitPush()`, `gitPull()`
 
-**Pattern**: All methods check `isElectron` and return early if not in Electron
+**Pattern**: All methods check `isElectron` and return early/null if not in Electron
 
 ### Gemini Service
 
-**Purpose**: AI integration for 3D modeling assistance
+**Purpose**: AI integration for interpreting commit messages as 3D modeling commands
 
 **Key Functions**:
-- `sendMessage(userMessage, history, modelContext)`: Chat interface
 - `interpretCommitMessage(message, sceneContext)`: Convert commit message to commands
 
 **Command Format**: JSON objects with `action` field:
@@ -676,16 +687,15 @@
 ```
 /path/to/
 ├── model.3dm                    # Original working file
-└── 0studio/
-    └── model/                   # Storage folder for this file
-        ├── commit-{id1}.3dm    # Commit file versions
-        ├── commit-{id2}.3dm
-        ├── commit-{id3}.3dm
-        └── tree.json           # Branch and commit tree metadata
+└── 0studio_model/               # Storage folder for this file (named 0studio_{filename})
+    ├── commit-{id1}.3dm         # Commit file versions
+    ├── commit-{id2}.3dm
+    ├── commit-{id3}.3dm
+    └── tree.json                # Branch and commit tree metadata
 ```
 
 **File Storage Service** (`electron/services/file-storage-service.ts`):
-- Creates `0studio/{filename}/` folder in the same directory as the .3dm file
+- Creates `0studio_{filename}/` folder in the same directory as the .3dm file
 - Stores each commit as `commit-{commitId}.3dm` in the storage folder
 - Stores branch and commit tree structure in `tree.json` (same folder as commits)
 - Validates commit files exist when loading tree.json
@@ -723,7 +733,7 @@
 
 **Persistence Flow**:
 1. **On Project Open**: 
-   - `VersionControlContext.setCurrentModel()` loads `tree.json` from `0studio/{filename}/` folder
+   - `VersionControlContext.setCurrentModel()` loads `tree.json` from `0studio_{filename}/` folder
    - Creates a `treeLoadPromise` that resolves when loading is complete
    - If `tree.json` exists and has commits, parses and loads branches, commits, activeBranchId, currentCommitId
    - Validates all commit files exist, warns about missing files
@@ -751,11 +761,13 @@
 - **Validated**: Checks for missing commit files and warns in console
 - **Backwards Compatible**: Falls back to localStorage if tree.json doesn't exist
 
-### Cloud Storage Architecture (Supabase + S3)
+### Cloud Storage Architecture (Supabase + S3) - PLANNED
 
-**Overview**: The system uses a hybrid approach combining Supabase (database) and AWS S3 (file storage with versioning).
+**⚠️ Implementation Status**: The backend API for cloud storage exists and is functional, but the frontend integration in VersionControlContext is NOT yet implemented. Currently, all version control is handled locally via the `0studio_{filename}/` folder structure.
 
-**Storage Structure**:
+**Overview**: The planned system uses a hybrid approach combining Supabase (database) and AWS S3 (file storage with versioning).
+
+**Planned Storage Structure**:
 ```
 S3 Bucket:
 └── org-{userId}/
@@ -766,48 +778,21 @@ S3 Bucket:
                └── texture.png
 ```
 
-**Database Schema** (Supabase):
-- `projects`: One row per file location
-  - `id` (uuid), `name` (text), `s3_key` (text), `owner_id` (uuid, references auth.users), `created_at` (timestamptz)
-- `commits`: One row per file version
-  - `id` (uuid), `project_id` (uuid, references projects), `parent_commit_id` (uuid, references commits), `message` (text), `author_id` (uuid, references auth.users), `s3_version_id` (text), `created_at` (timestamptz)
-- `branches`: Pointers to specific commits
-  - `id` (uuid), `project_id` (uuid, references projects), `name` (text), `head_commit_id` (uuid, references commits)
-- `subscriptions`: User payment plan subscriptions (managed by Stripe webhooks)
+**Database Schema** (Supabase - `subscriptions` table IS used):
+- `projects`: One row per file location - ⚠️ Table exists but not used by frontend
+- `commits`: One row per file version - ⚠️ Table exists but not used by frontend
+- `branches`: Pointers to specific commits - ⚠️ Table exists but not used by frontend
+- `subscriptions`: User payment plan subscriptions (ACTIVE - managed by Stripe webhooks)
   - `id` (uuid, primary key), `user_id` (uuid, references auth.users), `plan` (text: 'student' | 'enterprise')
   - `status` (text: 'active' | 'canceled' | 'past_due'), `stripe_customer_id` (text), `stripe_subscription_id` (text)
   - `created_at` (timestamptz), `updated_at` (timestamptz)
   - Managed automatically by Stripe webhook handlers in backend
 
-**Cloud Commit Flow**:
-```
-1. User creates a commit with changes
-   ↓
-2. Frontend uploads file to S3 via presigned URL (backend API)
-   ↓
-3. S3 returns x-amz-version-id header
-   ↓
-4. Frontend calls Supabase API: createCommit()
-   ↓
-5. Supabase stores commit with s3_version_id
-   ↓
-6. Commit linked to parent_commit_id (delta commits)
-```
-
-**Cloud Restore Flow**:
-```
-1. User selects a commit to restore
-   ↓
-2. Frontend fetches commit from Supabase (includes s3_version_id)
-   ↓
-3. Frontend requests presigned download URL for specific version (backend API)
-   ↓
-4. Backend generates presigned URL with VersionId parameter
-   ↓
-5. Frontend downloads file from S3
-   ↓
-6. ModelContext loads and displays restored model
-```
+**Backend API Status**:
+- ✅ AWS S3 presigned upload/download URLs - Implemented
+- ✅ Stripe payment integration - Implemented
+- ✅ Payment status API - Implemented
+- ⚠️ Frontend cloud sync integration - NOT implemented
 
 ---
 
@@ -822,21 +807,36 @@ S3 Bucket:
 - `git-operation-complete`: `{ operation }`
 
 **Renderer → Main (Invokes)**:
+
+*Project & File Management (Implemented):*
 - `open-project-dialog`: `() => Promise<string | null>`
 - `get-current-project`: `() => Promise<ProjectInfo | null>`
 - `close-project`: `() => Promise<void>`
-- `git-init`: `(projectPath: string) => Promise<void>`
-- `git-status`: `() => Promise<GitStatus>`
-- `git-commit`: `(message: string, files: string[]) => Promise<void>`
-- `git-log`: `() => Promise<GitCommit[]>`
-- `git-checkout`: `(commitHash: string) => Promise<void>`
-- `git-push`: `() => Promise<void>`
-- `git-pull`: `() => Promise<void>`
 - `start-file-watching`: `() => Promise<void>`
 - `stop-file-watching`: `() => Promise<void>`
 - `set-current-file`: `(filePath: string) => Promise<void>`
 - `read-file-buffer`: `(filePath: string) => Promise<ArrayBuffer>`
 - `write-file-buffer`: `(filePath: string, buffer: ArrayBuffer) => Promise<void>`
+
+*0studio Commit Storage (Implemented):*
+- `save-commit-file`: `(filePath: string, commitId: string, buffer: ArrayBuffer) => Promise<void>`
+- `read-commit-file`: `(filePath: string, commitId: string) => Promise<ArrayBuffer | null>`
+- `list-commit-files`: `(filePath: string) => Promise<string[]>`
+- `commit-file-exists`: `(filePath: string, commitId: string) => Promise<boolean>`
+- `save-tree-file`: `(filePath: string, treeData: object) => Promise<void>`
+- `load-tree-file`: `(filePath: string) => Promise<object | null>`
+- `validate-commit-files`: `(filePath: string, commitIds: string[]) => Promise<string[]>`
+
+*Git Operations (Exposed in preload but NOT implemented in main.ts):*
+- `git-init`: `(projectPath: string) => Promise<void>` - ⚠️ Handler not implemented
+- `git-status`: `() => Promise<GitStatus>` - ⚠️ Handler not implemented
+- `git-commit`: `(message: string, files: string[]) => Promise<void>` - ⚠️ Handler not implemented
+- `git-log`: `() => Promise<GitCommit[]>` - ⚠️ Handler not implemented
+- `git-checkout`: `(commitHash: string) => Promise<void>` - ⚠️ Handler not implemented
+- `git-push`: `() => Promise<void>` - ⚠️ Handler not implemented
+- `git-pull`: `() => Promise<void>` - ⚠️ Handler not implemented
+
+**Note**: Git IPC handlers are defined in `preload.ts` but the corresponding `ipcMain.handle()` calls are NOT implemented in `main.ts`. The `GitService` class exists but is not connected to IPC. Version control is handled locally via `tree.json` and commit files, not via Git.
 
 ### Backend API Endpoints
 
@@ -975,7 +975,7 @@ type SceneCommand =
 
 ### Local File Storage
 
-- **Storage location**: `0studio/{filename}/` folder in same directory as .3dm file
+- **Storage location**: `0studio_{filename}/` folder in same directory as .3dm file
 - **Commit files**: Stored as `commit-{commitId}.3dm` in storage folder
 - **Tree metadata**: Stored as `tree.json` in same folder as commit files
 - **Persistence**: Auto-saves tree.json on any commit/branch change
@@ -983,12 +983,12 @@ type SceneCommand =
 - **Validation**: Checks for missing commit files and warns in console
 - **File operations**: All via FileStorageService in Electron main process
 
-### Git Operations
+### Git Operations (NOT IMPLEMENTED)
 
-- **Repository location**: Same directory as .3dm file
-- **Initialization**: Creates .gitignore automatically
-- **Commits**: Store full model state in ModelCommit.modelData and fileBuffer
-- **Restoration**: Restores model state from commit data
+- **⚠️ Note**: Git IPC handlers are exposed in preload.ts but NOT implemented in main.ts
+- **GitService Class**: Exists in `electron/services/git-service.ts` but not connected to IPC
+- **Current Implementation**: Version control is handled via local `tree.json` and commit files, NOT Git
+- **Future**: Git integration could be added by implementing IPC handlers in main.ts
 
 ### Authentication (Supabase)
 
@@ -1045,16 +1045,14 @@ type SceneCommand =
   - Stripe: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
   - Server: `PORT`, `FRONTEND_URL`
 
-### Cloud Storage (Supabase + AWS S3)
+### Cloud Storage (Supabase + AWS S3) - Backend Only
 
-- **Database**: Supabase PostgreSQL (projects, commits, branches, subscriptions tables)
-- **File Storage**: AWS S3 with versioning enabled
-- **Backend API**: All S3 operations go through backend API server (not direct from frontend)
-- **S3 Structure**: `org-{userId}/project-{projectId}/models/{filename}`
-- **Version Tracking**: Each commit stores `s3_version_id` pointing to S3 version
-- **Delta Commits**: Only changed files get new S3 versions
+- **Database**: Supabase PostgreSQL (`subscriptions` table is active for payments; projects/commits/branches tables exist but unused)
+- **File Storage**: AWS S3 with versioning enabled (backend API ready)
+- **Backend API**: S3 operations implemented via Express server
+- **Frontend Integration**: ⚠️ NOT yet implemented - all version control is local
 - **Presigned URLs**: Used for secure upload/download without exposing AWS credentials
-- **Access Control**: Pull operations require active Stripe subscription
+- **Access Control**: Payment status is fetched from backend, but cloud operations not yet available in UI
 
 ### AI Integration
 
@@ -1099,7 +1097,7 @@ type SceneCommand =
 5. Renderer receives event:
    - ModelContext.importFile() loads file
    - VersionControlContext.setCurrentModel() sets path
-   - VersionControlContext loads `tree.json` from `0studio/{filename}/` folder:
+   - VersionControlContext loads `tree.json` from `0studio_{filename}/` folder:
      - If exists: Parses and loads branches and commits, validates commit files
      - If missing: Falls back to localStorage (backwards compatibility)
    - VersionControlContext.createInitialCommit() creates first commit (if no commits exist)
@@ -1111,7 +1109,7 @@ type SceneCommand =
 1. User enters commit message
 2. VersionControlContext.commitModelChanges()
 3. Creates ModelCommit with current modelData and fileBuffer
-4. Saves commit file to `0studio/{filename}/commit-{commitId}.3dm` via FileStorageService
+4. Saves commit file to `0studio_{filename}/commit-{commitId}.3dm` via FileStorageService
 5. If cloud enabled, uploads to S3 and creates Supabase commit
 6. Adds to commits array
 7. Sets as current commit
@@ -1133,7 +1131,7 @@ type SceneCommand =
 
 1. User clicks "Restore" on commit in history
 2. VersionControlContext.restoreToCommit(commitId)
-3. Retrieves fileBuffer from `0studio/{filename}/commit-{commitId}.3dm` (primary source)
+3. Retrieves fileBuffer from `0studio_{filename}/commit-{commitId}.3dm` (primary source)
    - Falls back to in-memory fileBuffer if file doesn't exist
    - Falls back to IndexedDB if in-memory not available
    - Falls back to exporting from modelData if all else fails
@@ -1149,7 +1147,7 @@ type SceneCommand =
 
 1. User clicks "Pull" button on commit
 2. VersionControlContext.pullFromCommit(commitId)
-3. Retrieves fileBuffer from `0studio/{filename}/commit-{commitId}.3dm` (primary source)
+3. Retrieves fileBuffer from `0studio_{filename}/commit-{commitId}.3dm` (primary source)
    - Falls back to in-memory fileBuffer if file doesn't exist
    - Falls back to IndexedDB if in-memory not available
    - Falls back to exporting from modelData if all else fails
@@ -1259,10 +1257,33 @@ type SceneCommand =
 
 ---
 
+## Implementation Gaps & Known Issues
+
+This section documents features that are partially implemented or have known gaps between the API surface and actual functionality.
+
+### Git Integration (Not Connected)
+- **Issue**: IPC handlers for Git operations are exposed in `preload.ts` but NOT implemented in `main.ts`
+- **Impact**: Calling `desktopAPI.gitStatus()`, `gitCommit()`, etc. will fail silently or throw
+- **Workaround**: Version control works via local `tree.json` and commit files
+- **Fix Required**: Add `ipcMain.handle()` calls in main.ts that use GitService
+
+### Cloud Sync (Backend Only)
+- **Issue**: Backend API for AWS S3 and Supabase is implemented, but frontend integration is missing
+- **Impact**: `useCloudPull()` hook references non-existent `pullFromCloud` and `isCloudEnabled`
+- **Workaround**: All version control is local
+- **Fix Required**: Add cloud sync methods to VersionControlContext
+
+### ProjectInfo Interface Inconsistency
+- **Issue**: `getCurrentProject()` in main.ts returns `{filePath, fileName}` but desktop-api.ts expects `{filePath, projectDir, fileName}`
+- **Impact**: `projectDir` will be undefined when accessed
+- **Fix Required**: Either update main.ts to include projectDir or remove it from interface
+
+---
+
 ## Recent Updates & Features
 
 ### Local File Storage & Tree Persistence (Latest)
-- **Local Commit Storage**: Commits stored as `commit-{commitId}.3dm` files in `0studio/{filename}/` folder
+- **Local Commit Storage**: Commits stored as `commit-{commitId}.3dm` files in `0studio_{filename}/` folder
 - **Tree.json Persistence**: Branch and commit tree structure persisted to `tree.json` in same folder as commits
 - **Dynamic File Paths**: File paths are not hardcoded - dynamically constructed from .3dm file path
 - **Auto-Save**: Tree.json automatically saved on any commit/branch change (skips during loading)
@@ -1289,10 +1310,11 @@ type SceneCommand =
 - **State Management**: Proper reset when project is closed
 - **UI**: Checkboxes with disabled state when limit reached
 
-### Cloud Storage Integration
-- **Supabase**: Full database integration for projects and commits
-- **AWS S3**: File storage with versioning via backend API
-- **Payment Gating**: Cloud pull requires active subscription
+### Cloud Storage Integration (Backend Ready, Frontend Pending)
+- **Supabase**: Database tables exist for projects and commits, but NOT integrated with frontend
+- **AWS S3**: Backend API for file storage with versioning is implemented
+- **Payment Gating**: Payment status is checked via backend API, but cloud pull/push not yet implemented in frontend
+- **Current Status**: All version control is local via `0studio_{filename}/` folder. Cloud sync is planned for future release.
 
 ### Payment System
 - **Stripe Integration**: Full subscription management
@@ -1339,12 +1361,12 @@ type SceneCommand =
 2. **Use desktop-api.ts**: For Electron IPC, don't call window.electronAPI directly
 3. **Follow command pattern**: For scene manipulation, use scene-commands.ts types
 4. **AI integration**: Use gemini-service.ts, follow command format
-5. **Cloud operations**: Use supabase-api.ts for database, aws-api.ts for file storage
-6. **Authentication**: Use AuthContext and check user state before cloud operations
+5. **Cloud operations**: Backend API ready (supabase-api.ts, aws-api.ts exist) but frontend integration NOT implemented
+6. **Authentication**: Use AuthContext and check user state - works for payment plans
 7. **Payment plans**: 
-   - Check `hasVerifiedPlan` before allowing pull operations, use `useCloudPull()` hook
    - Payment plans managed via Stripe subscriptions stored in Supabase `subscriptions` table
    - Use `refreshPaymentStatus()` in AuthContext to reload payment status from backend
+   - ⚠️ `useCloudPull()` hook exists but references non-existent methods - cloud pull not yet implemented
 8. **UI components**: Prefer Shadcn UI from `src/components/ui/`
 9. **Forms**: Use Shadcn Forms pattern
 10. **State management**: Use contexts for global state, useState for local
@@ -1365,7 +1387,7 @@ type SceneCommand =
     - Branch colors are assigned from `BRANCH_COLORS` array in order of creation
     - Reset branches when closing project via `clearCurrentModel()`
 15. **Local File Storage**:
-    - Commit files stored in `0studio/{filename}/` folder as `commit-{commitId}.3dm`
+    - Commit files stored in `0studio_{filename}/` folder as `commit-{commitId}.3dm`
     - Tree.json stored in same folder, contains full branch and commit metadata
     - File paths are NOT hardcoded - dynamically constructed from .3dm file path using `dirname()` and `basename()`
     - Use `desktopAPI.saveCommitFile()`, `readCommitFile()`, `saveTreeFile()`, `loadTreeFile()`

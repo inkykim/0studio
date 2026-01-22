@@ -286,7 +286,6 @@ app.delete('/api/aws/delete-version', verifyAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to delete version' });
   }
 });
-
 // ==================== STRIPE PAYMENT ENDPOINTS ====================
 
 // Create Stripe Checkout Session
