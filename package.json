@@ -111,11 +111,13 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "assets/**/*",
       "!**/node_modules/**/*",
       "!**/*.map"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.png",
       "target": [
         {
           "target": "dmg",
@@ -129,8 +131,7 @@
         {
           "ext": "3dm",
           "name": "Rhino 3D Model",
-          "description": "Rhino 3D Model File",
-          "icon": "assets/3dm-icon.icns"
+          "description": "Rhino 3D Model File"
         }
       ]
     },
