@@ -51,7 +51,7 @@
 - **Cloud Storage**: AWS S3 with versioning
 - **Authentication**: Supabase Auth
 - **Payments**: Stripe subscriptions
-- **AI Integration**: Removed (infrastructure was unused and has been cleaned up)
+- **AI Integration**: Completely removed - all AI-powered commit features and Google Gemini integration have been removed from the codebase
 
 ---
 
@@ -164,7 +164,7 @@
 - **@stripe/stripe-js 4.10.0**: Stripe client SDK
 - **Stripe Subscriptions**: Recurring payment plans
 
-### AI & Utilities
+### Utilities
 - **zod 3.25.76**: Schema validation
 - **react-hook-form 7.61.1**: Form handling
 - **date-fns 3.6.0**: Date utilities
@@ -287,7 +287,7 @@
 **`src/contexts/VersionControlContext.tsx`**
 - Manages version control state
 - Tracks commits, current commit, unsaved changes
-- Handles commit creation (regular and AI-powered)
+- Handles commit creation
 - Provides model restoration from commits
 - Manages gallery mode state (selection, toggle)
 - Coordinates with ModelContext via callbacks
@@ -362,7 +362,7 @@
 - UI for version control operations
 - **BranchingTree**: SVG-based visual tree with colored branch lines and commit nodes
 - Shows commit history with version labels, current commit, unsaved changes indicator
-- Commit input with AI option (🤖 checkbox) and custom branch name support
+- Commit input with custom branch name support
 - Pull (Download) and Restore buttons for each commit
 - **Gallery Mode Toggle**: Button to enter/exit gallery mode
 - **Commit Selection**: Checkboxes to select commits for gallery (max 4)
@@ -612,6 +612,7 @@
 /path/to/
 ├── model.3dm                    # Original working file
 └── 0studio_model/               # Storage folder for this file (named 0studio_{filename})
+                                  # Example: if file is "model.3dm", folder is "0studio_model"
     ├── commit-{id1}.3dm         # Commit file versions
     ├── commit-{id2}.3dm
     ├── commit-{id3}.3dm

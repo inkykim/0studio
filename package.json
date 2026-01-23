@@ -14,8 +14,9 @@
     "preview": "vite preview",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && sleep 2 && electron .\"",
     "electron:pack": "npm run build && electron-builder",
-    "electron:dist": "npm run build && electron-builder --publish=never",
+    "electron:dist": "npm run build && npm run build:electron && electron-builder --publish=never",
     "build:electron": "tsc -p electron/tsconfig.json && tsc -p electron/preload-tsconfig.json && mv dist-electron/preload.js dist-electron/preload.cjs",
+    "build:all": "npm run build && npm run build:electron && npm run electron:dist",
     "watch:electron": "tsc -w -p electron/tsconfig.json"
   },
   "dependencies": {
