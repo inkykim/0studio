@@ -86,8 +86,16 @@ export async function load3dmFile(
         console.log(`Points: ${pointsCount}`);
         console.log(`===============\n`);
 
+        // Convert from Rhino's Z-up coordinate system to Three.js Y-up
+        // Rhino: X=right, Y=forward, Z=up (model bottom at negative Z)
+        // Three.js: X=right, Y=up, Z=backward (model bottom at negative Y)
+        // Rotate -90° around X-axis: Z→Y, Y→Z (converts coordinate system)
+        // Then rotate 180° around Y-axis to flip it vertically so bottom stays on bottom
+        object.rotateX(-Math.PI / 2);
+        object.rotateY(Math.PI); // Flip 180° to correct vertical orientation
+        
         // Return the entire parsed object - it's already a proper Three.js group
-        // This preserves all transforms and hierarchy
+        // This preserves all transforms and hierarchy, with coordinate system conversion applied
         const objects: THREE.Object3D[] = [object];
         
         const metadata: Rhino3dmMetadata = {

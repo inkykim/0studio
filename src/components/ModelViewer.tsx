@@ -31,72 +31,74 @@ function calculateCameraDistance(
 ): number {
   if (box.isEmpty()) return 10;
   
-  // Calculate the bounding sphere that contains the box
-  // The radius is the maximum distance from center to any corner
-  const center = box.getCenter(new THREE.Vector3());
+  // Calculate the bounding box size
   const size = box.getSize(new THREE.Vector3());
-  const radius = size.length() * 0.5; // Distance from center to corner (half the diagonal)
+  const maxDim = Math.max(size.x, size.y, size.z);
   
-  if (radius === 0) return 10;
+  if (maxDim === 0) return 10;
   
   const fov = THREE.MathUtils.degToRad(camera.fov);
   const aspect = camera.aspect;
   const tanHalfFov = Math.tan(fov / 2);
   
-  // For a perspective camera, the visible sphere radius at distance d is:
-  // We need to fit the sphere in both vertical and horizontal directions
-  // Vertical: 2 * d * tan(fov/2) >= 2 * radius  =>  d >= radius / tan(fov/2)
-  // Horizontal: 2 * d * tan(fov/2) * aspect >= 2 * radius  =>  d >= radius / (tan(fov/2) * aspect)
+  // Calculate distance needed to fit the largest dimension
+  // For a perspective camera: visible height = 2 * d * tan(fov/2)
+  // We need: visible height >= maxDim
+  // So: d >= maxDim / (2 * tan(fov/2))
+  const distanceFromHeight = maxDim / (2 * tanHalfFov);
+  const distanceFromWidth = maxDim / (2 * tanHalfFov * aspect);
   
-  const distanceY = radius / tanHalfFov;
-  const distanceX = radius / (tanHalfFov * aspect);
-  
-  // Use the larger distance to ensure the sphere fits in both dimensions
-  const distance = Math.max(distanceX, distanceY);
+  // Use the larger distance to ensure the model fits in both dimensions
+  const distance = Math.max(distanceFromHeight, distanceFromWidth);
   
   // Apply padding and ensure minimum distance
   return Math.max(0.1, distance * padding);
 }
 
 /**
- * Positions the camera to view the model centered and fit to screen
- * Uses a consistent isometric-like angle for all models
+ * Positions the camera to view the model fit to screen
+ * Uses a consistent isometric-like angle, but looks at the model's actual center
+ * This preserves the original Rhino orientation
  */
 function fitCameraToModel(
   camera: THREE.PerspectiveCamera,
   box: THREE.Box3,
-  controls?: { target: THREE.Vector3; update: () => void } | null
+  controls?: { target: THREE.Vector3; update: () => void } | null,
+  modelCenter?: THREE.Vector3
 ): void {
+  const center = modelCenter || box.getCenter(new THREE.Vector3());
+  
   if (box.isEmpty()) {
-    camera.position.set(5, 5, 8);
-    camera.lookAt(0, 0, 0);
+    camera.position.set(center.x + 5, center.y + 5, center.z + 8);
+    camera.lookAt(center);
     if (controls) {
-      controls.target.set(0, 0, 0);
+      controls.target.copy(center);
       controls.update();
     }
     return;
   }
   
   // Calculate optimal distance to fit the bounding box
-  const distance = calculateCameraDistance(box, camera, 1.2);
+  // Use padding of ~2.0 to make model take up ~60% of viewport instead of filling it
+  const distance = calculateCameraDistance(box, camera, 2.0);
   
   // Use a consistent camera angle: 45° elevation, 45° azimuth
   // This creates an isometric-like view that's consistent across all models
   const elevation = Math.PI / 4; // 45 degrees
   const azimuth = Math.PI / 4;   // 45 degrees
   
-  // Calculate position on a sphere around the origin
-  const x = distance * Math.cos(elevation) * Math.cos(azimuth);
-  const y = distance * Math.sin(elevation);
-  const z = distance * Math.cos(elevation) * Math.sin(azimuth);
+  // Calculate position on a sphere around the model's center (not origin)
+  const x = center.x + distance * Math.cos(elevation) * Math.cos(azimuth);
+  const y = center.y + distance * Math.sin(elevation);
+  const z = center.z + distance * Math.cos(elevation) * Math.sin(azimuth);
   
   camera.position.set(x, y, z);
-  camera.lookAt(0, 0, 0);
+  camera.lookAt(center);
   camera.updateProjectionMatrix();
   
-  // Update controls to look at center
+  // Update controls to look at model center (preserving original position)
   if (controls) {
-    controls.target.set(0, 0, 0);
+    controls.target.copy(center);
     controls.update();
   }
 }
@@ -147,15 +149,13 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
 
       console.log(`Total objects in group: ${groupRef.current.children.length}`);
 
-      // Reset position and scale first
-      groupRef.current.position.set(0, 0, 0);
-      groupRef.current.scale.set(1, 1, 1);
-      groupRef.current.rotation.set(0, 0, 0);
-
-      // Force update the matrix before calculating bounding box
+      // Preserve original position, rotation, and scale from Rhino
+      // Do NOT reset transforms - this preserves the exact orientation as in Rhino
+      
+      // Force update the matrix to ensure transforms are applied
       groupRef.current.updateMatrixWorld(true);
 
-      // Calculate bounding box
+      // Calculate bounding box in world space (preserving original transforms)
       const box = new THREE.Box3().setFromObject(groupRef.current);
       
       if (!box.isEmpty()) {
@@ -167,30 +167,10 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
         console.log(`Bounding box - max: (${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`);
         console.log(`Bounding box - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
         console.log(`Bounding box - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
-        
-        // Move group so its center is at origin - ensure we're using the correct center
-        console.log(`Moving group by: (${(-center.x).toFixed(2)}, ${(-center.y).toFixed(2)}, ${(-center.z).toFixed(2)})`);
-        groupRef.current.position.set(-center.x, -center.y, -center.z);
-        
-        // Force another matrix update after positioning
-        groupRef.current.updateMatrixWorld(true);
-        
-        // Scale model down slightly to make it more proportional to grid
-        const scaleFactor = 0.85; // Scale down by 15%
-        groupRef.current.scale.setScalar(scaleFactor);
-        
-        // Verify the centering worked by recalculating the bounding box
-        groupRef.current.updateMatrixWorld(true);
-        const centeredBox = new THREE.Box3().setFromObject(groupRef.current);
-        const verifyCenter = centeredBox.getCenter(new THREE.Vector3());
-        console.log(`After centering - new center: (${verifyCenter.x.toFixed(2)}, ${verifyCenter.y.toFixed(2)}, ${verifyCenter.z.toFixed(2)})`);
+        console.log(`Model orientation preserved from Rhino - no transforms applied`);
 
         // Calculate model scale for grid adjustment
-        // Use the size before scaling to determine appropriate grid scale
-        const modelSize = size; // Use original size before scaling
-        const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
-        // Calculate scale factor: if model is 10 units, scale should be 10
-        // This will make grid cells scale proportionally
+        const maxDim = Math.max(size.x, size.y, size.z);
         const calculatedScale = maxDim > 0 ? maxDim : 1;
         
         // Notify parent of scale change for grid adjustment
@@ -201,10 +181,12 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
         // Ensure camera aspect is up to date
         camera.updateProjectionMatrix();
         
-        // Position camera to fit the model in view
-        fitCameraToModel(camera as THREE.PerspectiveCamera, centeredBox, orbitControls);
+        // Position camera to fit the model in view, looking at the model's center
+        // This preserves the original orientation while ensuring the model is visible
+        fitCameraToModel(camera as THREE.PerspectiveCamera, box, orbitControls, center);
         
         console.log(`Camera positioned at: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
+        console.log(`Camera target (model center): (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
       } else {
         console.warn("Bounding box is empty!");
       }
@@ -265,12 +247,13 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
 
         // Recalculate bounding box after centering for accurate camera positioning
         const centeredBox = new THREE.Box3().setFromObject(groupRef.current);
+        const centeredCenter = centeredBox.getCenter(new THREE.Vector3());
         
         // Ensure camera aspect is up to date
         camera.updateProjectionMatrix();
         
         // Position camera to fit the model in view (no scaling - let camera handle fit)
-        fitCameraToModel(camera as THREE.PerspectiveCamera, centeredBox, orbitControls);
+        fitCameraToModel(camera as THREE.PerspectiveCamera, centeredBox, orbitControls, centeredCenter);
         
         console.log(`Camera positioned for generated objects at: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
       }
@@ -816,7 +799,6 @@ export const ModelViewer = () => {
               />
 
               <SceneContent onSceneReady={handleSceneReady} />
-              <CameraRotation />
 
               <OrbitControls
                 enablePan={true}
