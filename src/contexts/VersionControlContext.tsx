@@ -33,7 +33,6 @@ interface VersionControlContextType {
   commits: ModelCommit[];
   currentCommitId: string | null;
   hasUnsavedChanges: boolean;
-  isProcessingAICommit: boolean;
   
   // Branching
   branches: Branch[];
@@ -43,7 +42,6 @@ interface VersionControlContextType {
   // Actions
   setCurrentModel: (path: string) => void;
   commitModelChanges: (message: string, currentModelData?: LoadedModel, customBranchName?: string) => Promise<void>;
-  commitWithAI: (message: string) => Promise<{ success: boolean; error?: string }>;
   createInitialCommit: (modelData: LoadedModel, fileBuffer?: ArrayBuffer, filePath?: string) => void | Promise<void>;
   restoreToCommit: (commitId: string) => Promise<boolean>;
   pullFromCommit: (commitId: string) => Promise<boolean>; // Pull commit to local file (updates file on disk)
@@ -69,10 +67,6 @@ interface VersionControlContextType {
   // Model restoration callback - will be set by ModelContext
   onModelRestore?: (modelData: LoadedModel) => void;
   setModelRestoreCallback: (callback: (modelData: LoadedModel) => void) => void;
-  
-  // AI commit callbacks - will be set by a component that can execute commands
-  onAICommit?: (message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>;
-  setAICommitCallback: (callback: (message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>) => void;
 }
 
 const VersionControlContext = createContext<VersionControlContextType | undefined>(undefined);
@@ -99,9 +93,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [commits, setCommits] = useState<ModelCommit[]>([]);
   const [currentCommitId, setCurrentCommitId] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [isProcessingAICommit, setIsProcessingAICommit] = useState(false);
   const [onModelRestore, setOnModelRestore] = useState<((modelData: LoadedModel) => void) | undefined>(undefined);
-  const [onAICommit, setOnAICommit] = useState<((message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>) | undefined>(undefined);
   const [isGalleryMode, setIsGalleryMode] = useState(false);
   const [selectedCommitIds, setSelectedCommitIds] = useState<Set<string>>(new Set());
   const [isLoadingTree, setIsLoadingTree] = useState(false);
@@ -114,10 +106,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
 
   const setModelRestoreCallback = useCallback((callback: (modelData: LoadedModel) => void) => {
     setOnModelRestore(() => callback);
-  }, []);
-
-  const setAICommitCallback = useCallback((callback: (message: string) => Promise<{ success: boolean; modelData?: LoadedModel; error?: string }>) => {
-    setOnAICommit(() => callback);
   }, []);
 
   // Helper function to get storage key for a file path
@@ -683,40 +671,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     return branchCommits.findIndex(c => c.id === commitId) + 1;
   }, [commits]);
 
-  // Commit using AI to interpret the message and modify the model
-  const commitWithAI = useCallback(async (message: string): Promise<{ success: boolean; error?: string }> => {
-    if (!currentModel) {
-      return { success: false, error: "No model is currently open" };
-    }
-
-    if (!onAICommit) {
-      return { success: false, error: "AI commit handler not set up" };
-    }
-
-    setIsProcessingAICommit(true);
-
-    try {
-      // Call the AI commit handler which will interpret the message and execute commands
-      const result = await onAICommit(message);
-
-      if (!result.success) {
-        setIsProcessingAICommit(false);
-        return { success: false, error: result.error };
-      }
-
-      // Use commitModelChanges to handle both local and cloud commits
-      await commitModelChanges(`🤖 ${message}`, result.modelData);
-      setIsProcessingAICommit(false);
-
-      console.log("AI-driven commit created");
-      return { success: true };
-    } catch (error) {
-      console.error("Failed to create AI commit:", error);
-      setIsProcessingAICommit(false);
-      return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
-    }
-  }, [currentModel, onAICommit, commitModelChanges]);
-
   const restoreToCommit = useCallback(async (commitId: string): Promise<boolean> => {
     try {
       const commit = commits.find(c => c.id === commitId);
@@ -1157,7 +1111,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     commits,
     currentCommitId,
     hasUnsavedChanges,
-    isProcessingAICommit,
     // Branching
     branches,
     activeBranchId,
@@ -1165,7 +1118,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     // Actions
     setCurrentModel,
     commitModelChanges,
-    commitWithAI,
     createInitialCommit,
     restoreToCommit,
     pullFromCommit,
@@ -1188,8 +1140,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     // Callbacks
     onModelRestore,
     setModelRestoreCallback,
-    onAICommit,
-    setAICommitCallback,
   };
 
   return (

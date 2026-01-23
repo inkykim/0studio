@@ -88,8 +88,6 @@ class DesktopAPIService {
 
   async gitPull(): Promise<void> {
     if (!this.isElectron || !window.electronAPI) return;
-    // Note: Payment plan validation should be checked by the caller
-    // Use the useCloudPull hook in React components for proper validation
     return window.electronAPI.gitPull();
   }
 

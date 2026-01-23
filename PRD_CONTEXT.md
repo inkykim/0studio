@@ -30,15 +30,17 @@
 
 - **File-Based Projects**: Open any .3dm file as a project
 - **Auto-Detection**: Automatically detects when .3dm files are saved in Rhino
-- **Git Integration**: Full version control with commit, push, pull operations
-- **Visual Timeline**: Browse through model history with intuitive timeline UI
+- **Local Version Control**: Full version control with commit history, branching, and restore operations
+- **Visual Timeline**: Browse through model history with intuitive branching tree UI
 - **Gallery Mode**: Compare up to 4 model versions side-by-side in adaptive grid layouts
-- **AI-Powered Commits**: Use natural language to describe changes, AI interprets and applies them
 - **3D Model Viewer**: Interactive Three.js-based viewer for .3dm files
-- **Scene Manipulation**: Create, transform, and modify 3D primitives programmatically
-- **Cloud Storage**: Sync models to AWS S3 with versioning and Supabase database
-- **Payment Plans**: Student and Enterprise plans that unlock cloud storage features
+- **Payment Plans**: Student and Enterprise plans (Stripe integration ready)
 - **macOS Native**: Built specifically for macOS with proper file associations
+
+### Planned Features (Not Yet Implemented)
+
+- **Cloud Storage**: Backend API ready, frontend integration pending
+- **Git Integration**: Service exists but IPC handlers not implemented
 
 ### Project Structure
 
@@ -49,7 +51,7 @@
 - **Cloud Storage**: AWS S3 with versioning
 - **Authentication**: Supabase Auth
 - **Payments**: Stripe subscriptions
-- **AI Integration**: Google Gemini API (for AI-powered commits)
+- **AI Integration**: Removed (infrastructure was unused and has been cleaned up)
 
 ---
 
@@ -163,7 +165,6 @@
 - **Stripe Subscriptions**: Recurring payment plans
 
 ### AI & Utilities
-- **@google/generative-ai 0.21.0**: Google Gemini API
 - **zod 3.25.76**: Schema validation
 - **react-hook-form 7.61.1**: Form handling
 - **date-fns 3.6.0**: Date utilities
@@ -205,9 +206,7 @@
 │   │
 │   ├── lib/             # Core libraries and services
 │   │   ├── desktop-api.ts        # Electron IPC wrapper
-│   │   ├── gemini-service.ts     # Google Gemini AI integration
 │   │   ├── rhino3dm-service.ts   # Rhino file loading/exporting
-│   │   ├── scene-commands.ts    # Scene manipulation commands
 │   │   ├── supabase-api.ts      # Supabase database operations
 │   │   ├── aws-api.ts           # AWS S3 operations
 │   │   ├── commit-storage.ts    # IndexedDB storage for commits
@@ -219,7 +218,6 @@
 │   │   └── NotFound.tsx # 404 page
 │   │
 │   └── hooks/           # Custom React hooks
-│       ├── use-cloud-pull.ts    # Cloud pull with payment validation
 │       └── use-mobile.tsx       # Mobile detection
 │
 ├── backend/             # Backend API server
@@ -326,12 +324,6 @@
 - Converts between Three.js and Rhino mesh formats
 - Provides metadata about loaded models
 
-**`src/lib/gemini-service.ts`**
-- Integrates with Google Gemini API
-- Main function: `interpretCommitMessage()` converts commit messages to scene commands
-- System prompts define AI capabilities and command format
-- Returns JSON commands that can be executed
-
 **`src/lib/supabase-api.ts`**
 - API service for Supabase database operations
 - Methods for projects, commits, and branches CRUD operations
@@ -398,18 +390,6 @@
 - Accessible via `/dashboard` route
 - Requires both `VersionControlProvider` and `ModelProvider`
 
-**`src/hooks/use-cloud-pull.ts`**
-- Hook for cloud pull operations with payment plan validation
-- Checks if user has verified payment plan before allowing pulls
-- Shows error toast with dashboard link if plan is missing
-- **⚠️ Note**: This hook references `pullFromCloud` and `isCloudEnabled` from VersionControlContext, but these methods/state are NOT currently implemented. The hook exists for future cloud integration.
-
-**`src/lib/scene-commands.ts`**
-- Defines command types: create, transform, color, delete, clear
-- Parses Gemini responses for JSON commands
-- Executes commands via CommandExecutor interface
-- Validates command structure
-
 **`src/lib/commit-storage.ts`**
 - IndexedDB storage for commit file buffers (legacy, used as fallback)
 - Stores large file buffers separately from localStorage
@@ -457,7 +437,6 @@
 - `commits`: Array of ModelCommit objects
 - `currentCommitId`: ID of currently active commit
 - `hasUnsavedChanges`: Whether model has uncommitted changes
-- `isProcessingAICommit`: Whether AI commit is in progress
 - `branches`: Array of Branch objects (branching feature)
 - `activeBranchId`: Currently selected branch ID
 - `pulledCommitId`: ID of commit that was last pulled/downloaded (for highlighting)
@@ -469,7 +448,6 @@
 **Key Methods**:
 - `setCurrentModel(path)`: Set current model, loads tree.json and creates treeLoadPromise
 - `commitModelChanges(message, modelData, customBranchName?)`: Create regular commit (auto-branches when committing from non-head)
-- `commitWithAI(message)`: Create AI-powered commit
 - `restoreToCommit(commitId)`: Restore model to specific commit (UI only, doesn't update disk)
 - `pullFromCommit(commitId)`: Pull commit to local file (updates disk, sets pulledCommitId for branch tracking)
 - `createInitialCommit(modelData, fileBuffer?, filePath?)`: Create first commit and main branch (awaits treeLoadPromise first)
@@ -485,7 +463,6 @@
 - `getBranchCommits(branchId)`: Get all commits for a specific branch
 - `getCommitVersionLabel(commit)`: Get version label (v1, v2, v3a, v3b, etc.)
 - `setModelRestoreCallback(callback)`: Set callback for restoring model from commit
-- `setAICommitCallback(callback)`: Set callback for AI commit execution
 
 **Branching Logic**:
 - When `pullFromCommit` is called, `pulledCommitId` is set to track the pulled commit
@@ -498,7 +475,6 @@
 - Listens to file changes (via desktopAPI) to mark unsaved changes
 - Listens to project-closed events to reset gallery mode and branches
 - Uses callbacks to ModelContext for model restoration (`onModelRestore`)
-- Uses callback to execute AI commands (`onAICommit`, set by component)
 - Uses FileStorageService (via desktopAPI) for local commit file storage
 - Uses tree.json for persisting branch/commit metadata
 
@@ -542,36 +518,6 @@
 
 **Pattern**: All methods check `isElectron` and return early/null if not in Electron
 
-### Gemini Service
-
-**Purpose**: AI integration for interpreting commit messages as 3D modeling commands
-
-**Key Functions**:
-- `interpretCommitMessage(message, sceneContext)`: Convert commit message to commands
-
-**Command Format**: JSON objects with `action` field:
-- `create`: Create primitive
-- `transform`: Move/rotate/scale
-- `color`: Change color
-- `delete`: Remove object
-- `clear`: Clear all generated objects
-
-**System Prompts**: Define AI capabilities and expected output format
-
-### Scene Commands
-
-**Purpose**: Execute AI-generated commands on 3D scene
-
-**Key Types**:
-- `CreateCommand`, `TransformCommand`, `ColorCommand`, `DeleteCommand`, `ClearCommand`
-- `SceneCommand`: Union of all command types
-
-**Key Functions**:
-- `parseGeminiResponse(response)`: Extract JSON commands from text
-- `executeCommands(commands, executor)`: Execute commands via executor interface
-
-**Executor Interface**: Provides methods matching ModelContext scene manipulation
-
 ---
 
 ## Data Flow & State Management
@@ -614,28 +560,6 @@
 7. Reloads model and updates scene
    ↓
 8. VersionControlContext.markUnsavedChanges()
-```
-
-### AI Commit Flow
-
-```
-1. User enters commit message in VersionControl UI
-   ↓
-2. VersionControlContext.commitWithAI(message)
-   ↓
-3. Calls onAICommit callback (set by component)
-   ↓
-4. Component calls gemini-service.interpretCommitMessage()
-   ↓
-5. Gemini returns JSON commands array
-   ↓
-6. Component executes commands via ModelContext methods
-   ↓
-7. ModelContext updates scene (adds/modifies objects)
-   ↓
-8. Component returns updated modelData
-   ↓
-9. VersionControlContext creates commit with modelData
 ```
 
 ### Commit Restoration Flow
@@ -1026,7 +950,6 @@ type SceneCommand =
 - **Restrictions**: 
   - Commits: Always allowed (local operations)
   - Pull from cloud storage: Requires active subscription (`status: 'active'`)
-- **Hook**: `useCloudPull()` hook provides validated pull operations with error handling
 
 ### Backend API Server
 
@@ -1053,13 +976,6 @@ type SceneCommand =
 - **Frontend Integration**: ⚠️ NOT yet implemented - all version control is local
 - **Presigned URLs**: Used for secure upload/download without exposing AWS credentials
 - **Access Control**: Payment status is fetched from backend, but cloud operations not yet available in UI
-
-### AI Integration
-
-- **API Key**: `VITE_GEMINI_API_KEY` environment variable
-- **Model**: `gemini-3.0-flash` for chat, `gemini-2.5-flash` for commit interpretation
-- **Command parsing**: Extracts JSON from markdown code blocks
-- **Error handling**: Returns user-friendly error messages
 
 ### 3D Scene Management
 
@@ -1115,17 +1031,6 @@ type SceneCommand =
 7. Sets as current commit
 8. Clears unsaved changes flag
 9. Auto-saves `tree.json` via useEffect hook (includes new commit and updated branch head)
-
-**AI Commit**:
-1. User enters commit message
-2. VersionControlContext.commitWithAI()
-3. Calls onAICommit callback
-4. Component calls gemini-service.interpretCommitMessage()
-5. Gemini returns commands
-6. Component executes commands via ModelContext
-7. ModelContext updates scene
-8. Component returns updated modelData
-9. VersionControlContext creates commit with updated data
 
 ### Restoring a Commit
 
@@ -1269,9 +1174,9 @@ This section documents features that are partially implemented or have known gap
 
 ### Cloud Sync (Backend Only)
 - **Issue**: Backend API for AWS S3 and Supabase is implemented, but frontend integration is missing
-- **Impact**: `useCloudPull()` hook references non-existent `pullFromCloud` and `isCloudEnabled`
-- **Workaround**: All version control is local
-- **Fix Required**: Add cloud sync methods to VersionControlContext
+- **Impact**: All version control is local only
+- **Workaround**: N/A - local storage works fine
+- **Fix Required**: Add cloud sync methods to VersionControlContext when cloud features are needed
 
 ### ProjectInfo Interface Inconsistency
 - **Issue**: `getCurrentProject()` in main.ts returns `{filePath, fileName}` but desktop-api.ts expects `{filePath, projectDir, fileName}`
@@ -1332,7 +1237,6 @@ This section documents features that are partially implemented or have known gap
 ## Environment Variables
 
 ### Frontend
-- `VITE_GEMINI_API_KEY`: Google Gemini API key (required for AI features)
 - `VITE_SUPABASE_URL`: Supabase project URL (required for auth and database)
 - `VITE_SUPABASE_ANON_KEY`: Supabase anonymous key (required for auth and database)
 - `VITE_BACKEND_URL`: Backend API URL (defaults to `http://localhost:3000`)
@@ -1359,14 +1263,12 @@ This section documents features that are partially implemented or have known gap
 
 1. **Check existing contexts**: ModelContext, VersionControlContext, AuthContext
 2. **Use desktop-api.ts**: For Electron IPC, don't call window.electronAPI directly
-3. **Follow command pattern**: For scene manipulation, use scene-commands.ts types
-4. **AI integration**: Use gemini-service.ts, follow command format
+3. **Scene manipulation**: Use ModelContext methods (addPrimitive, transformObject, etc.)
 5. **Cloud operations**: Backend API ready (supabase-api.ts, aws-api.ts exist) but frontend integration NOT implemented
 6. **Authentication**: Use AuthContext and check user state - works for payment plans
 7. **Payment plans**: 
    - Payment plans managed via Stripe subscriptions stored in Supabase `subscriptions` table
    - Use `refreshPaymentStatus()` in AuthContext to reload payment status from backend
-   - ⚠️ `useCloudPull()` hook exists but references non-existent methods - cloud pull not yet implemented
 8. **UI components**: Prefer Shadcn UI from `src/components/ui/`
 9. **Forms**: Use Shadcn Forms pattern
 10. **State management**: Use contexts for global state, useState for local
@@ -1412,15 +1314,6 @@ This section documents features that are partially implemented or have known gap
 2. Note the file path in console
 3. Save a .3dm file to that path (or modify existing)
 4. App should auto-reload and show unsaved changes
-
-### AI Command Execution
-
-1. Commands come from Gemini as JSON
-2. Parsed by scene-commands.parseGeminiResponse()
-3. Executed via CommandExecutor interface
-4. ModelContext implements executor methods
-5. Commands update generatedObjects array
-6. Scene re-renders automatically
 
 ---
 
