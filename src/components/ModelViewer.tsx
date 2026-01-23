@@ -500,9 +500,10 @@ export const ModelViewer = () => {
     triggerFileDialog,
   } = useModel();
   
-  const { isGalleryMode, selectedCommitIds, commits, currentCommitId } = useVersionControl();
+  const { isGalleryMode, selectedCommitIds, commits, currentCommitId, currentModel, modelName } = useVersionControl();
 
   const [isDragOver, setIsDragOver] = useState(false);
+  const [galleryModelData, setGalleryModelData] = useState<Map<string, LoadedModel>>(new Map());
   
   // Get selected commits for gallery mode (capped at 4)
   const selectedCommits = useMemo(() => {
@@ -511,6 +512,52 @@ export const ModelViewer = () => {
     // Ensure we only show up to 4 commits
     return filtered.slice(0, 4);
   }, [isGalleryMode, selectedCommitIds, commits]);
+
+  // Load model data for selected commits in gallery mode
+  useEffect(() => {
+    if (!isGalleryMode || selectedCommits.length === 0) {
+      setGalleryModelData(new Map());
+      return;
+    }
+
+    const loadCommitModels = async () => {
+      const newModelData = new Map<string, LoadedModel>();
+      
+      for (const commit of selectedCommits) {
+        // If modelData already exists in memory, use it
+        if (commit.modelData) {
+          newModelData.set(commit.id, commit.modelData);
+          continue;
+        }
+
+        // Otherwise, load from commit file
+        try {
+          const { desktopAPI } = await import('@/lib/desktop-api');
+          const { load3dmFile } = await import('@/lib/rhino3dm-service');
+          
+          if (desktopAPI.isDesktop && currentModel) {
+            const fileBuffer = await desktopAPI.readCommitFile(currentModel, commit.id);
+            if (fileBuffer) {
+              const file = new File([fileBuffer], modelName || 'model.3dm', { type: 'application/octet-stream' });
+              const loaded = await load3dmFile(file);
+              newModelData.set(commit.id, loaded);
+            }
+          } else if (commit.fileBuffer) {
+            // Fall back to in-memory file buffer
+            const file = new File([commit.fileBuffer], modelName || 'model.3dm', { type: 'application/octet-stream' });
+            const loaded = await load3dmFile(file);
+            newModelData.set(commit.id, loaded);
+          }
+        } catch (error) {
+          console.error(`Failed to load model data for commit ${commit.id}:`, error);
+        }
+      }
+      
+      setGalleryModelData(newModelData);
+    };
+
+    loadCommitModels();
+  }, [isGalleryMode, selectedCommits, currentModel, modelName]);
 
   // Safety check for stats - provide default values if undefined
   const safeStats = stats || { curves: 0, surfaces: 0, polysurfaces: 0 };
@@ -720,7 +767,7 @@ export const ModelViewer = () => {
                     <hemisphereLight
                       args={["#ffffff", "#444444", 0.6]}
                     />
-                    <SceneContent onSceneReady={() => {}} modelData={commit.modelData || null} />
+                    <SceneContent onSceneReady={() => {}} modelData={galleryModelData.get(commit.id) || commit.modelData || null} />
                     <OrbitControls
                       enablePan={true}
                       enableZoom={true}
@@ -783,19 +830,23 @@ export const ModelViewer = () => {
               />
             </Canvas>
 
-            {/* Viewport info overlay */}
-            <div className="absolute bottom-4 left-4 z-20 text-code text-xs text-muted-foreground space-y-1">
-              <div>Curves: {safeStats.curves}</div>
-              <div>Surfaces: {safeStats.surfaces}</div>
-              <div>Polysurfaces: {safeStats.polysurfaces}</div>
-            </div>
+            {/* Viewport info overlay - only show when model is loaded */}
+            {loadedModel && (
+              <>
+                <div className="absolute bottom-4 left-4 z-20 text-code text-xs text-muted-foreground space-y-1">
+                  <div>Curves: {safeStats.curves}</div>
+                  <div>Surfaces: {safeStats.surfaces}</div>
+                  <div>Polysurfaces: {safeStats.polysurfaces}</div>
+                </div>
 
-            {/* Controls hint */}
-            <div className="absolute bottom-4 right-4 z-20 text-code text-xs text-muted-foreground">
-              <span className="opacity-60">
-                Drag to rotate / Scroll to zoom
-              </span>
-            </div>
+                {/* Controls hint */}
+                <div className="absolute bottom-4 right-4 z-20 text-code text-xs text-muted-foreground">
+                  <span className="opacity-60">
+                    Drag to rotate / Scroll to zoom
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

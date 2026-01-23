@@ -5,15 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3, GitBranch, Check } from "lucide-react";
+import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 
 const formatTimeAgo = (timestamp: number) => {
@@ -237,7 +230,7 @@ const BranchingTree = ({
                   cy={y}
                   r={nodeRadius + 4}
                   fill="none"
-                  stroke="#f59e0b"
+                  stroke="#a3a3a3"
                   strokeWidth={2}
                   className="animate-pulse"
                 />
@@ -268,7 +261,7 @@ const BranchingTree = ({
               key={node.commit.id}
               className={`flex gap-3 group cursor-pointer rounded-md p-2 transition-colors ${
                 isPulledCommit 
-                  ? 'bg-amber-500/20 ring-2 ring-amber-500/50' 
+                  ? 'bg-secondary/30 ring-2 ring-border' 
                   : isCurrentCommit 
                   ? 'bg-primary/10' 
                   : 'hover:bg-secondary/50'
@@ -327,7 +320,7 @@ const BranchingTree = ({
                     </button>
                     <p className="text-sm font-medium truncate">{node.commit.message}</p>
                     {isPulledCommit && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-amber-500/20 text-amber-600 border-amber-500/50">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-secondary/30 text-foreground border-border">
                         working
                       </Badge>
                     )}
@@ -341,8 +334,7 @@ const BranchingTree = ({
                     {node.branch && !node.branch.isMain && (
                       <Badge 
                         variant="outline" 
-                        className="text-[10px] px-1.5 py-0 h-4"
-                        style={{ borderColor: node.branch.color, color: node.branch.color }}
+                        className="text-[10px] px-1.5 py-0 h-4 border-border text-foreground"
                       >
                         {node.branch.name}
                       </Badge>
@@ -390,7 +382,6 @@ export const VersionControl = () => {
     currentCommitId, 
     hasUnsavedChanges,
     branches,
-    activeBranchId,
     pulledCommitId,
     setCurrentModel,
     commitModelChanges,
@@ -399,8 +390,6 @@ export const VersionControl = () => {
     markUnsavedChanges,
     clearCurrentModel,
     toggleStarCommit,
-    switchBranch,
-    keepBranch,
     getCommitVersionLabel,
     isGalleryMode,
     selectedCommitIds,
@@ -475,12 +464,6 @@ export const VersionControl = () => {
     });
   };
 
-  const handleKeepBranch = () => {
-    if (activeBranchId) {
-      keepBranch(activeBranchId);
-    }
-  };
-
   // Filter commits based on search and starred filter
   const filteredCommits = useMemo(() => {
     let filtered = commits;
@@ -499,10 +482,6 @@ export const VersionControl = () => {
     return filtered;
   }, [commits, showStarredOnly, searchQuery]);
 
-  // Get active branch info
-  const activeBranch = branches.find(b => b.id === activeBranchId);
-  const nonMainBranches = branches.filter(b => !b.isMain);
-
   if (!currentFile) {
     return (
       <div className="h-full flex flex-col panel-glass">
@@ -514,14 +493,8 @@ export const VersionControl = () => {
         </div>
         
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <Archive className="w-12 h-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium mb-2">No Model Open</h3>
-          <p className="text-sm text-muted-foreground mb-6">
-            Open a .3dm file to start tracking versions of your 3D model.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Use the Model Viewer tab to import a .3dm file
-          </p>
+          <Archive className="w-12 h-12 text-muted-foreground mb-3" />
+          <p className="text-sm text-muted-foreground">No model open</p>
         </div>
       </div>
     );
@@ -559,57 +532,6 @@ export const VersionControl = () => {
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-6">
-          {/* Branch Selector */}
-          {branches.length > 1 && (
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Current Branch
-                </h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <Select value={activeBranchId || ''} onValueChange={switchBranch}>
-                  <SelectTrigger className="flex-1 h-8">
-                    <div className="flex items-center gap-2">
-                      <GitBranch className="w-3.5 h-3.5" />
-                      <SelectValue placeholder="Select branch" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {branches.map(branch => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-2 h-2 rounded-full" 
-                            style={{ backgroundColor: branch.color }}
-                          />
-                          <span>{branch.name}</span>
-                          {branch.isMain && (
-                            <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 ml-1">
-                              main
-                            </Badge>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {activeBranch && !activeBranch.isMain && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleKeepBranch}
-                    className="h-8 px-3 gap-1"
-                    title="Set this branch as the main branch"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    Keep
-                  </Button>
-                )}
-              </div>
-            </section>
-          )}
-
           {/* Commit Input */}
           {hasUnsavedChanges && (
             <section>
@@ -628,7 +550,7 @@ export const VersionControl = () => {
                   }}
                 />
                 {pulledCommitId && (
-                  <p className="text-xs text-amber-600">
+                  <p className="text-xs text-muted-foreground">
                     Creating new branch from {getCommitVersionLabel(commits.find(c => c.id === pulledCommitId)!)}
                   </p>
                 )}

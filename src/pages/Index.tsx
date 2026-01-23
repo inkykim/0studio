@@ -2,8 +2,37 @@ import { TitleBar } from "@/components/TitleBar";
 import { VersionControl } from "@/components/VersionControl";
 import { ModelViewer } from "@/components/ModelViewer";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
-import { ModelProvider } from "@/contexts/ModelContext";
+import { ModelProvider, useModel } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
+
+const MainContent = () => {
+  const { currentFile } = useModel();
+  const hasModel = !!currentFile;
+
+  return (
+    <div className="flex-1 p-2 overflow-hidden">
+      {hasModel ? (
+        <ResizablePanelGroup direction="horizontal" className="h-full overflow-hidden">
+          {/* Version Control Panel */}
+          <ResizablePanel defaultSize={30} minSize={25} maxSize={45}>
+            <VersionControl />
+          </ResizablePanel>
+
+          <ResizableHandle className="w-1 bg-transparent hover:bg-primary/20 transition-colors" />
+
+          {/* 3D Viewport */}
+          <ResizablePanel defaultSize={70} minSize={55}>
+            <ModelViewer />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <div className="h-full">
+          <ModelViewer />
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Index = () => {
   return (
@@ -14,21 +43,7 @@ const Index = () => {
           <TitleBar />
 
           {/* Main Content */}
-          <div className="flex-1 p-2 overflow-hidden">
-            <ResizablePanelGroup direction="horizontal" className="h-full overflow-hidden">
-              {/* Version Control Panel */}
-              <ResizablePanel defaultSize={30} minSize={25} maxSize={45}>
-                <VersionControl />
-              </ResizablePanel>
-
-              <ResizableHandle className="w-1 bg-transparent hover:bg-primary/20 transition-colors" />
-
-              {/* 3D Viewport */}
-              <ResizablePanel defaultSize={70} minSize={55}>
-                <ModelViewer />
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </div>
+          <MainContent />
         </div>
       </ModelProvider>
     </VersionControlProvider>

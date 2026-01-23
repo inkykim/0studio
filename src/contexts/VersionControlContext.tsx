@@ -76,16 +76,9 @@ interface VersionControlProviderProps {
 }
 
 // Branch colors for visualization
-const BRANCH_COLORS = [
-  '#ef4444', // red (main)
-  '#22c55e', // green
-  '#3b82f6', // blue
-  '#f59e0b', // amber
-  '#8b5cf6', // purple
-  '#ec4899', // pink
-  '#14b8a6', // teal
-  '#f97316', // orange
-];
+const CURRENT_WORKING_BRANCH_COLOR = '#22c55e'; // green
+const PREVIOUSLY_WORKING_BRANCH_COLOR = '#ef4444'; // red
+const DEFAULT_BRANCH_COLOR = '#737373'; // gray for other branches
 
 export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ children }) => {
   const [currentModel, setCurrentModelState] = useState<string | null>(null);
@@ -103,6 +96,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const [pulledCommitId, setPulledCommitId] = useState<string | null>(null);
+  const [previouslyWorkingBranchId, setPreviouslyWorkingBranchId] = useState<string | null>(null);
 
   const setModelRestoreCallback = useCallback((callback: (modelData: LoadedModel) => void) => {
     setOnModelRestore(() => callback);
@@ -214,6 +208,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         version: '1.0',
         activeBranchId: activeBranchId,
         currentCommitId: currentCommitId,
+        previouslyWorkingBranchId: previouslyWorkingBranchId, // Save previously working branch
         branches: branches.map(b => ({
           id: b.id,
           name: b.name,
@@ -243,10 +238,10 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         console.warn('Failed to save tree.json (non-critical):', errorMessage);
       }
     }
-  }, [branches, commits, activeBranchId, currentCommitId]);
+  }, [branches, commits, activeBranchId, currentCommitId, previouslyWorkingBranchId]);
 
   // Helper function to load tree.json file
-  const loadTreeFile = useCallback(async (filePath: string): Promise<{ branches: Branch[], commits: ModelCommit[], activeBranchId: string | null, currentCommitId: string | null } | null> => {
+  const loadTreeFile = useCallback(async (filePath: string): Promise<{ branches: Branch[], commits: ModelCommit[], activeBranchId: string | null, currentCommitId: string | null, previouslyWorkingBranchId: string | null } | null> => {
     if (!desktopAPI.isDesktop || !filePath) return null;
 
     try {
@@ -287,11 +282,15 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         // They will be loaded from files when needed
       }));
 
+      // Restore previously working branch ID if available
+      const loadedPreviouslyWorkingBranchId = (treeData as any).previouslyWorkingBranchId || null;
+      
       return {
         branches: loadedBranches,
         commits: loadedCommits,
         activeBranchId: treeData.activeBranchId,
         currentCommitId: treeData.currentCommitId,
+        previouslyWorkingBranchId: loadedPreviouslyWorkingBranchId,
       };
     } catch (error) {
       console.error('Failed to load tree.json:', error);
@@ -321,6 +320,12 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       if (treeData && treeData.commits.length > 0) {
         // Loaded from tree.json
         console.log(`Loaded ${treeData.commits.length} commits and ${treeData.branches.length} branches from tree.json`);
+        
+        // Restore previously working branch ID
+        if (treeData.previouslyWorkingBranchId) {
+          setPreviouslyWorkingBranchId(treeData.previouslyWorkingBranchId);
+        }
+        
         setBranches(treeData.branches);
         setCommits(treeData.commits);
         setActiveBranchId(treeData.activeBranchId);
@@ -334,10 +339,15 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       
       // Load branches
       if (persistedBranches.length > 0) {
-        setBranches(persistedBranches);
-        // Set active branch to main or first branch
+        // Initialize branch colors: main/active branch is green, others are gray
         const mainBranch = persistedBranches.find(b => b.isMain);
-        setActiveBranchId(mainBranch?.id || persistedBranches[0]?.id || null);
+        const activeBranchIdFromStorage = mainBranch?.id || persistedBranches[0]?.id || null;
+        const branchesWithColors = persistedBranches.map(b => ({
+          ...b,
+          color: b.id === activeBranchIdFromStorage ? CURRENT_WORKING_BRANCH_COLOR : (b.color || DEFAULT_BRANCH_COLOR),
+        }));
+        setBranches(branchesWithColors);
+        setActiveBranchId(activeBranchIdFromStorage);
       }
       
       if (persistedCommits.length > 0) {
@@ -413,14 +423,20 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           id: mainBranchId,
           name: 'main',
           headCommitId: '', // Will be updated after commit
-          color: BRANCH_COLORS[0],
+          color: CURRENT_WORKING_BRANCH_COLOR, // Current working branch is green
           isMain: true,
         };
         return [mainBranch];
       }
       return prevBranches;
     });
-    setActiveBranchId(prev => prev || mainBranchId);
+    const branchIdToSet = activeBranchId || mainBranchId;
+    if (branchIdToSet) {
+      setBranches(prevBranches => prevBranches.map(b => 
+        b.id === branchIdToSet ? { ...b, color: CURRENT_WORKING_BRANCH_COLOR } : b
+      ));
+    }
+    setActiveBranchId(branchIdToSet);
 
     // Generate a unique commit ID with timestamp and random component
     const commitId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -446,7 +462,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       id: mainBranchId,
       name: 'main',
       headCommitId: commitId,
-      color: BRANCH_COLORS[0],
+      color: CURRENT_WORKING_BRANCH_COLOR, // Current working branch is green
       isMain: true,
     };
     const updatedBranches = [mainBranch];
@@ -472,6 +488,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           version: '1.0',
           activeBranchId: mainBranchId,
           currentCommitId: commitId,
+          previouslyWorkingBranchId: previouslyWorkingBranchId, // Save previously working branch
           branches: updatedBranches.map(b => ({
             id: b.id,
             name: b.name,
@@ -510,7 +527,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         }
       });
     }
-  }, [branches, commits, activeBranchId, currentCommitId, currentModel, saveTreeFile, isLoadingTree]);
+  }, [branches, commits, activeBranchId, currentCommitId, previouslyWorkingBranchId, currentModel, saveTreeFile, isLoadingTree]);
 
   // Debug: Track hasUnsavedChanges state changes
   useEffect(() => {
@@ -585,7 +602,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           id: newBranchId,
           name: branchName,
           headCommitId: '', // Will be updated after commit
-          color: BRANCH_COLORS[branches.length % BRANCH_COLORS.length],
+          color: CURRENT_WORKING_BRANCH_COLOR, // New branch becomes current working (green)
           parentBranchId: activeBranchId || undefined,
           originCommitId: pulledCommitId,
           isMain: false,
@@ -618,6 +635,24 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         // Update head of current branch
         updatedBranches = updatedBranches.map(b => 
           b.id === targetBranchId ? { ...b, headCommitId: commitId } : b
+        );
+      }
+      
+      // Update branch colors before setting active branch
+      const previousActiveId = activeBranchId;
+      if (previousActiveId && previousActiveId !== targetBranchId) {
+        setPreviouslyWorkingBranchId(previousActiveId);
+        updatedBranches = updatedBranches.map(b => {
+          if (b.id === previousActiveId) {
+            return { ...b, color: PREVIOUSLY_WORKING_BRANCH_COLOR };
+          } else if (b.id === targetBranchId) {
+            return { ...b, color: CURRENT_WORKING_BRANCH_COLOR };
+          }
+          return b;
+        });
+      } else if (targetBranchId) {
+        updatedBranches = updatedBranches.map(b => 
+          b.id === targetBranchId ? { ...b, color: CURRENT_WORKING_BRANCH_COLOR } : b
         );
       }
       
@@ -842,8 +877,25 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       setPulledCommitId(commitId); // Track which commit was pulled for highlighting
       setHasUnsavedChanges(false);
       
-      // Switch to the branch of this commit
-      setActiveBranchId(commit.branchId);
+      // Switch to the branch of this commit and update colors
+      const previousActiveId = activeBranchId;
+      const newBranchId = commit.branchId;
+      if (previousActiveId && previousActiveId !== newBranchId) {
+        setPreviouslyWorkingBranchId(previousActiveId);
+        setBranches(prevBranches => prevBranches.map(b => {
+          if (b.id === previousActiveId) {
+            return { ...b, color: PREVIOUSLY_WORKING_BRANCH_COLOR };
+          } else if (b.id === newBranchId) {
+            return { ...b, color: CURRENT_WORKING_BRANCH_COLOR };
+          }
+          return b;
+        }));
+      } else if (newBranchId) {
+        setBranches(prevBranches => prevBranches.map(b => 
+          b.id === newBranchId ? { ...b, color: CURRENT_WORKING_BRANCH_COLOR } : b
+        ));
+      }
+      setActiveBranchId(newBranchId);
       
       toast.success("File updated to exact commit version - Rhino should auto-reload");
       return true;
@@ -981,12 +1033,29 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       return;
     }
     
+    const previousActiveId = activeBranchId;
+    if (previousActiveId && previousActiveId !== branchId) {
+      setPreviouslyWorkingBranchId(previousActiveId);
+      setBranches(prevBranches => prevBranches.map(b => {
+        if (b.id === previousActiveId) {
+          return { ...b, color: PREVIOUSLY_WORKING_BRANCH_COLOR };
+        } else if (b.id === branchId) {
+          return { ...b, color: CURRENT_WORKING_BRANCH_COLOR };
+        }
+        return b;
+      }));
+    } else if (branchId) {
+      setBranches(prevBranches => prevBranches.map(b => 
+        b.id === branchId ? { ...b, color: CURRENT_WORKING_BRANCH_COLOR } : b
+      ));
+    }
+    
     setActiveBranchId(branchId);
     setCurrentCommitId(branch.headCommitId);
     setPulledCommitId(null);
     
     console.log(`Switched to branch: ${branch.name}`);
-  }, [branches]);
+  }, [branches, activeBranchId]);
 
   const keepBranch = useCallback((branchId: string) => {
     if (!currentModel) return;
@@ -997,11 +1066,27 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       return;
     }
     
-    // Mark this branch as main and demote others
-    const updatedBranches = branches.map(b => ({
-      ...b,
-      isMain: b.id === branchId,
-    }));
+    // Mark this branch as main and demote others, update colors
+    const previousActiveId = activeBranchId;
+    const updatedBranches = branches.map(b => {
+      const isMain = b.id === branchId;
+      let color = b.color;
+      
+      if (b.id === branchId) {
+        // Current working branch is green
+        color = CURRENT_WORKING_BRANCH_COLOR;
+      } else if (b.id === previousActiveId && previousActiveId !== branchId) {
+        // Previously working branch is red
+        color = PREVIOUSLY_WORKING_BRANCH_COLOR;
+        setPreviouslyWorkingBranchId(previousActiveId);
+      }
+      
+      return {
+        ...b,
+        isMain,
+        color,
+      };
+    });
     
     setBranches(updatedBranches);
     setActiveBranchId(branchId);

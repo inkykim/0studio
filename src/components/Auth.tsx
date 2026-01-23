@@ -73,7 +73,13 @@ export function AuthDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline">Sign In</Button>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="h-6 px-2 text-xs rounded-sm"
+        >
+          Sign In
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
@@ -325,7 +331,7 @@ export function ResetPasswordDialog() {
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             {isSuccess ? (
-              <div className="text-sm text-green-600 dark:text-green-400 text-center py-4">
+              <div className="text-sm text-foreground text-center py-4">
                 Password reset email sent! Please check your inbox.
               </div>
             ) : (
