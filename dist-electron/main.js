@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { FileWatcherService } from './services/file-watcher.js';
 import { FileStorageService } from './services/file-storage-service.js';
+// Note: GitService removed - uses simple-git which requires bundling node_modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 class RhinoStudio {
@@ -11,7 +12,6 @@ class RhinoStudio {
         this.mainWindow = null;
         this.currentProjectFile = null;
         this.fileWatcher = null;
-        this.gitService = null;
         this.fileStorage = new FileStorageService();
         this.setupApp();
         this.setupIPC();

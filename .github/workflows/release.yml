@@ -1,0 +1,119 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Electron app
+        run: npm run build:all
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List build artifacts
+        run: ls -la dist-electron/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-builds
+          path: |
+            dist-electron/*.dmg
+            dist-electron/*.zip
+          retention-days: 5
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-builds
+          path: ./artifacts
+
+      - name: List downloaded artifacts
+        run: ls -la ./artifacts/
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: 0studio v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            ./artifacts/*.dmg
+            ./artifacts/*.zip
+          body: |
+            ## 0studio v${{ steps.version.outputs.version }}
+            
+            ### Installation
+            
+            **Via Homebrew (recommended):**
+            ```bash
+            brew tap YOUR_GITHUB_USERNAME/0studio
+            brew install --cask 0studio
+            ```
+            
+            **Manual installation:**
+            - Download the `.dmg` file for your architecture
+            - Open the DMG and drag 0studio to Applications
+            
+            ### Downloads
+            - `0studio-${{ steps.version.outputs.version }}-arm64.dmg` - Apple Silicon (M1/M2/M3)
+            - `0studio-${{ steps.version.outputs.version }}.dmg` - Intel Macs
+            - `.zip` files for Homebrew Cask distribution
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd ./artifacts
+          for file in *.zip; do
+            sha256sum "$file" > "$file.sha256"
+            echo "SHA256 for $file:"
+            cat "$file.sha256"
+          done
+
+      - name: Upload checksums
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          files: ./artifacts/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
