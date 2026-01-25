@@ -1,7 +1,7 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2026-01-22  
-**Version:** 1.2.0  
+**Last Updated:** 2026-01-23  
+**Version:** 1.3.0  
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -51,7 +51,7 @@
 - **Cloud Storage**: AWS S3 with versioning
 - **Authentication**: Supabase Auth
 - **Payments**: Stripe subscriptions
-- **AI Integration**: Completely removed - all AI-powered commit features and Google Gemini integration have been removed from the codebase
+- **AI Integration**: Removed - all AI-powered commit features and Google Gemini integration have been removed (package remains but unused)
 
 ---
 
@@ -177,6 +177,12 @@
 
 ```
 0studio/
+├── 0studio_mac_icon.png  # Source icon (1024x1024 PNG)
+├── assets/               # Build assets
+│   └── icon.png          # Prepared icon for electron-builder
+├── scripts/              # Build scripts
+│   └── create-icon.sh    # Icon preparation script
+│
 ├── electron/              # Electron main process code
 │   ├── main.ts           # Main Electron process entry point
 │   ├── preload.ts        # Preload script (context bridge)
@@ -274,7 +280,9 @@
 
 **`src/pages/Index.tsx`**
 - Main application layout with macOS-style title bar
-- Resizable panels: VersionControl (30%) | ModelViewer (70%)
+- **Conditional Panel Layout**: 
+  - With model loaded: Resizable panels - VersionControl (30%) | ModelViewer (70%)
+  - Without model: Full-width ModelViewer with clean empty state
 - Wraps content in VersionControlProvider → ModelProvider (order matters!)
 
 **`src/contexts/ModelContext.tsx`**
@@ -341,14 +349,16 @@
 
 **`src/components/ModelViewer.tsx`**
 - React Three Fiber canvas for 3D rendering
-- Displays loaded .3dm models with automatic centering and camera fitting
+- Displays loaded .3dm models with automatic camera fit-to-model
+- **Camera Positioning**: Automatically fits model to ~60% of viewport with consistent isometric-like angle (45° elevation, 45° azimuth)
+- **Orientation Preserved**: Model transforms from Rhino are preserved (no centering transforms)
 - Renders generated primitives (AI-created objects)
 - Provides OrbitControls for camera manipulation (rotate, zoom, pan)
 - Multi-directional lighting setup (ambient, directional, hemisphere)
-- Adaptive grid floor that scales based on model size
+- **Adaptive Grid**: Grid cell size scales proportionally to model dimensions using "nice numbers" (1, 2, 5, 10, etc.)
 - Scene stats overlay (curves, surfaces, polysurfaces count)
 - Drag-and-drop file import support
-- Empty state with file picker button
+- Empty state with file picker button (centered, clean UI)
 - Loading and error states
 - **Gallery Mode**: Adaptive grid layouts for comparing multiple commits
   - 1 model: Full view
@@ -861,6 +871,29 @@ type SceneCommand =
 
 ## Development Guidelines
 
+### Building for Production
+
+**Development Mode**:
+```bash
+npm run electron:dev    # Run app with hot reload
+```
+
+**Production Build**:
+```bash
+npm run build:all       # Complete build (Vite + Electron + DMG)
+npm run electron:dist   # Alternative: explicit dist build
+```
+
+**Build Output**:
+- React app: `dist/`
+- Electron compiled: `dist-electron/`
+- macOS DMG: `dist-electron/0studio-{version}.dmg`
+
+**Icon Preparation** (run once if icon changes):
+```bash
+./scripts/create-icon.sh
+```
+
 ### Code Style
 
 - **TypeScript**: Strict mode enabled, prefer explicit types
@@ -1188,7 +1221,46 @@ This section documents features that are partially implemented or have known gap
 
 ## Recent Updates & Features
 
-### Local File Storage & Tree Persistence (Latest)
+### macOS App Build (Latest - v1.3.0)
+
+**Production Build Configuration**:
+- **Custom App Icon**: 1024x1024 PNG icon (`0studio_mac_icon.png`) with auto-conversion to .icns
+- **Icon Script**: `scripts/create-icon.sh` validates and prepares icon for electron-builder
+- **App Configuration**:
+  - Product Name: `0studio`
+  - App ID: `com.rhinostudio.app`
+  - Category: `public.app-category.developer-tools`
+- **DMG Builds**: Supports both x64 and arm64 Mac architectures
+- **File Associations**: Opens `.3dm` files directly
+- **Build Scripts**:
+  - `npm run build:all` - Complete production build
+  - `npm run electron:dist` - Build distributable DMG
+
+**Improved 3D Viewport**:
+- **Camera Fit-to-Model**: Camera automatically positions to show model at ~60% of viewport
+- **Consistent Viewing Angle**: 45° elevation, 45° azimuth isometric-like view for all models
+- **Preserved Orientation**: Model orientation from Rhino is preserved (no transforms applied)
+- **Adaptive Grid**: Grid cell size scales proportionally to model dimensions
+- **Smart Grid Sizing**: Uses "nice numbers" (1, 2, 5, 10, etc.) for grid cell sizes
+
+**Improved Home UI**:
+- **Conditional Panel Layout**: Resizable panels only shown when model is loaded
+- **Clean Empty State**: Centered import UI with drag & drop area
+- **Streamlined Flow**: Single full-width viewport for file selection
+
+**Cleaner Branching UI**:
+- **Neutral Color Scheme**: Replaced amber/yellow highlighting with gray tones
+- **Working Badge**: "working" label instead of "pulled" for active commit
+- **Subtle Highlights**: `bg-secondary/30` with `ring-border` for pulled commits
+- **Visual Hierarchy**: Better distinction between current, working, and historical commits
+
+**AI Features Removed**:
+- All AI-powered commit message generation removed
+- Google Gemini integration removed
+- `@google/generative-ai` package remains but unused (can be removed)
+- Cleaner codebase focused on core version control functionality
+
+### Local File Storage & Tree Persistence
 - **Local Commit Storage**: Commits stored as `commit-{commitId}.3dm` files in `0studio_{filename}/` folder
 - **Tree.json Persistence**: Branch and commit tree structure persisted to `tree.json` in same folder as commits
 - **Dynamic File Paths**: File paths are not hardcoded - dynamically constructed from .3dm file path
@@ -1299,6 +1371,13 @@ This section documents features that are partially implemented or have known gap
     - `createInitialCommit()` awaits `treeLoadPromise` to prevent race conditions and duplicate commits
     - Save tree.json before project close to ensure persistence
     - Handle errors gracefully (log warnings, don't throw)
+
+16. **Building for Distribution**:
+    - Run `npm run build:all` for complete production build
+    - Icon must be 1024x1024 PNG for proper .icns conversion
+    - DMG output goes to `dist-electron/` directory
+    - App supports both Intel (x64) and Apple Silicon (arm64) Macs
+    - File associations allow double-clicking .3dm files to open in 0studio
 
 ### Common Patterns
 

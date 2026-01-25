@@ -2,6 +2,20 @@
 
 This guide covers how to build and package 0studio for shipping to end users.
 
+
+TLDR:
+# Step 1: Fix npm cache permissions
+sudo chown -R $(whoami):staff ~/.npm
+
+# Step 2: Upgrade electron-builder
+npm install electron-builder@26.5.0 --save-dev
+
+# Step 3: Clean old build artifacts
+rm -rf dist dist-electron
+
+# Step 4: Rebuild
+npm run build:all
+
 ## Prerequisites
 
 Before building, ensure you have:
