@@ -3,8 +3,8 @@ import { join, dirname, basename } from 'path';
 import { existsSync, mkdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { FileWatcherService } from './services/file-watcher.js';
-import { GitService } from './services/git-service.js';
 import { FileStorageService } from './services/file-storage-service.js';
+// Note: GitService removed - uses simple-git which requires bundling node_modules
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -13,7 +13,6 @@ class RhinoStudio {
   private mainWindow: BrowserWindow | null = null;
   private currentProjectFile: string | null = null;
   private fileWatcher: FileWatcherService | null = null;
-  private gitService: GitService | null = null;
   private fileStorage: FileStorageService = new FileStorageService();
 
   constructor() {
