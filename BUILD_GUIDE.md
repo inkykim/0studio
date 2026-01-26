@@ -30,14 +30,11 @@ Before building, ensure you have:
 For production builds, environment variables are embedded at build time. Make sure your `.env` file contains all required variables:
 
 ```env
-# Supabase (required)
+# Supabase (optional - only for cloud features)
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your_anon_key
 
-# Google Gemini (required for AI features)
-VITE_GEMINI_API_KEY=your_gemini_api_key
-
-# Backend API (required for cloud features)
+# Backend API (optional - only for cloud features)
 VITE_BACKEND_URL=https://your-backend-url.com
 ```
 

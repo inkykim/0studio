@@ -1,13 +1,9 @@
 // Supabase client configuration
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// TEMPORARY: Hardcoded for testing (will switch back to env vars after testing)
-const supabaseUrl = 'https://fjgbfijgnkqzknwarptm.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || '';
-
-// TODO: Switch back to reading from env after testing
-// const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
-// const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+// Read from environment variables
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 // Validate that we're using the anon key, not the service_role key
 function validateAnonKey(key: string): boolean {

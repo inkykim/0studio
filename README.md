@@ -62,18 +62,17 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` with your credentials:
+Edit `.env` with your credentials (optional - only needed for cloud features):
 ```env
-# Supabase (required for auth and cloud features)
+# Supabase (optional - for auth and cloud features)
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 
-# Google Gemini (required for AI features)
-VITE_GEMINI_API_KEY=your_gemini_api_key
-
-# Backend API (for cloud storage and payments)
+# Backend API (optional - for cloud storage and payments)
 VITE_BACKEND_URL=http://localhost:3000
 ```
+
+> **Note**: For local-only usage, no environment variables are required. The app works fully offline with local file storage.
 
 4. **Build Electron components**:
 ```bash
