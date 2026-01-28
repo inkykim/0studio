@@ -1,7 +1,7 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2026-01-23  
-**Version:** 1.3.0  
+**Last Updated:** 2026-01-27  
+**Version:** 1.4.0  
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -18,7 +18,8 @@
 8. [Development Guidelines](#development-guidelines)
 9. [Key Workflows](#key-workflows)
 10. [Implementation Gaps & Known Issues](#implementation-gaps--known-issues)
-11. [Recent Updates & Features](#recent-updates--features)
+11. [Implementation Status Tracker](#implementation-status-tracker)
+12. [Recent Updates & Features](#recent-updates--features)
 
 ---
 
@@ -161,8 +162,9 @@
 - **AWS S3**: File storage with versioning (via backend API)
 
 ### Payments
-- **@stripe/stripe-js 4.10.0**: Stripe client SDK
-- **Stripe Subscriptions**: Recurring payment plans
+- **@stripe/stripe-js ^8.0.0**: Stripe client SDK
+- **@stripe/react-stripe-js**: Stripe Elements React components
+- **Stripe Subscriptions**: Recurring payment plans with embedded checkout
 
 ### Utilities
 - **zod 3.25.76**: Schema validation
@@ -221,6 +223,7 @@
 │   ├── pages/           # Page components
 │   │   ├── Index.tsx    # Main application page
 │   │   ├── Dashboard.tsx # Payment plan selection
+│   │   ├── Checkout.tsx  # Custom Stripe checkout page
 │   │   └── NotFound.tsx # 404 page
 │   │
 │   └── hooks/           # Custom React hooks
@@ -312,6 +315,8 @@
 - Tracks user session and loading state
 - Manages payment plan state (student/enterprise/none) from backend API
 - Auto-refreshes tokens and persists sessions
+- **Auto-redirect to checkout**: When user signs up without a subscription, automatically redirects to `/checkout` with default Student plan
+- Uses `justSignedInRef` to track fresh sign-ups and OAuth returns
 
 **`src/lib/desktop-api.ts`**
 - Singleton service wrapping Electron IPC
@@ -340,12 +345,14 @@
 - ⚠️ **Note**: Complete and functional, but NOT currently called from VersionControlContext
 
 **`src/lib/aws-api.ts`**
-- AWS S3 API service (via backend API)
-- Methods for presigned URLs (upload/download)
-- File upload/download with version ID tracking
-- S3 key generation helpers
-- Singleton instance exported as `awsS3API`
-- ⚠️ **Note**: Complete and functional, but NOT currently called from VersionControlContext
+- AWS S3 API client classes (via backend API)
+- **AWSS3API class** (`awsS3API`): Methods for presigned URLs, upload/download, version listing
+  - Calls `/api/aws/*` backend endpoints which DO exist
+  - ⚠️ **NOT IMPORTED OR USED ANYWHERE** - dead code
+- **FilesAPI class** (`filesAPI`): Methods for model/version management
+  - Calls `/files/*` backend endpoints which DON'T exist
+  - ⚠️ **NOT WORKING** - backend endpoints not implemented
+- Both singleton instances exported but never used in the application
 
 **`src/components/ModelViewer.tsx`**
 - React Three Fiber canvas for 3D rendering
@@ -392,13 +399,26 @@
   - If user not logged in, shows AuthDialog instead
 
 **`src/pages/Dashboard.tsx`**
-- Dashboard UI for selecting payment plans via Stripe Checkout
-- Displays Student and Enterprise plan options with pricing
+- Dashboard UI for selecting payment plans
+- Displays Student ($10/mo) and Enterprise plan options with pricing
 - Shows current plan status and feature limitations
-- Integrates with Stripe Checkout for subscription creation
+- Navigates to custom `/checkout` page when user selects a plan
 - Handles Stripe redirect callbacks (success/cancel)
 - Accessible via `/dashboard` route
 - Requires both `VersionControlProvider` and `ModelProvider`
+
+**`src/pages/Checkout.tsx`**
+- Custom checkout page with embedded Stripe Elements
+- Uses `@stripe/react-stripe-js` PaymentElement for secure payment input
+- Displays plan summary with features on left, payment form on right
+- Creates subscription via backend `/api/stripe/create-subscription-intent`
+- Processes payment entirely within Electron app (no external redirect)
+- Shows loading state while auth initializes
+- Handles payment confirmation and redirects to dashboard on success
+- "Compare all plans" button links back to Dashboard
+- "Back to app" button returns to main app
+- Requires `VITE_STRIPE_PUBLISHABLE_KEY` environment variable
+- Requires both `VersionControlProvider` and `ModelProvider` (for TitleBar)
 
 **`src/lib/commit-storage.ts`**
 - IndexedDB storage for commit file buffers (legacy, used as fallback)
@@ -724,10 +744,11 @@ S3 Bucket:
   - Managed automatically by Stripe webhook handlers in backend
 
 **Backend API Status**:
-- ✅ AWS S3 presigned upload/download URLs - Implemented
+- ✅ AWS S3 presigned upload/download URLs - Backend endpoints implemented (`/api/aws/*`)
 - ✅ Stripe payment integration - Implemented
 - ✅ Payment status API - Implemented
-- ⚠️ Frontend cloud sync integration - NOT implemented
+- ❌ `/files/*` endpoints - NOT implemented (frontend FilesAPI expects these)
+- ❌ Frontend cloud sync integration - NOT implemented (awsS3API never called)
 
 ---
 
@@ -782,11 +803,16 @@ S3 Bucket:
 - `DELETE /api/aws/delete-version?key=...&versionId=...` - Delete S3 file version
 
 **Stripe Payment Operations**:
-- `POST /api/stripe/create-checkout-session` - Create Stripe Checkout Session (requires auth)
+- `POST /api/stripe/create-checkout-session` - Create Stripe Checkout Session (requires auth) - **DEPRECATED, use create-subscription-intent**
   - Body: `{ lookup_key?: string, price_id?: string }`
   - Returns: `{ sessionId: string, url: string }`
+- `POST /api/stripe/create-subscription-intent` - Create subscription with PaymentIntent for embedded checkout (requires auth) - **NEW**
+  - Body: `{ price_id: string, plan: string }`
+  - Returns: `{ subscriptionId: string, clientSecret: string }`
+  - Creates Stripe customer if not exists, creates subscription with `payment_behavior: 'default_incomplete'`
+  - Stores pending subscription in Supabase (activated via webhook on payment success)
 - `POST /api/stripe/webhook` - Stripe webhook handler (NO auth, uses signature verification)
-  - Handles: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
+  - Handles: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`
 - `GET /api/stripe/payment-status` - Get user's payment/subscription status (requires auth)
   - Returns: `{ hasActivePlan: boolean, plan: 'student' | 'enterprise' | null, status: string }`
 
@@ -960,7 +986,7 @@ npm run electron:dist   # Alternative: explicit dist build
 
 ### Payment Plans (Stripe Integration)
 
-- **Plans**: Student and Enterprise subscription plans via Stripe
+- **Plans**: Student ($10/mo) and Enterprise subscription plans via Stripe
 - **Payment Provider**: Stripe subscriptions (recurring billing)
 - **Storage**: Payment plan stored in Supabase `subscriptions` table
   - Managed via Stripe webhooks (not manual updates)
@@ -968,18 +994,26 @@ npm run electron:dist   # Alternative: explicit dist build
   - **Local Development**: `http://localhost:3000`
   - **Stripe Webhook Endpoint**: `POST /api/stripe/webhook`
     - Local: Use Stripe CLI: `stripe listen --forward-to localhost:3000/api/stripe/webhook`
-- **Stripe Checkout Flow**:
-  1. User clicks plan in Dashboard
-  2. Frontend calls `POST /api/stripe/create-checkout-session`
-  3. Backend creates Stripe Checkout Session
-  4. User redirected to Stripe Checkout page
-  5. After payment, redirected back to Dashboard with `success=true`
-  6. Frontend calls `refreshPaymentStatus()` to update plan status
+- **Embedded Checkout Flow** (NEW - stays in Electron app):
+  1. User signs up → auto-redirected to `/checkout` with Student plan
+  2. OR User clicks plan in Dashboard → navigates to `/checkout?plan=...&priceId=...&price=...`
+  3. Checkout page calls `POST /api/stripe/create-subscription-intent`
+  4. Backend creates Stripe customer and subscription with PaymentIntent
+  5. Checkout page renders Stripe PaymentElement with clientSecret
+  6. User enters card details in embedded form (no external redirect)
+  7. Payment confirmed via `stripe.confirmPayment()` 
+  8. Webhook `invoice.payment_succeeded` updates subscription to 'active'
+  9. Checkout page navigates to Dashboard with `success=true`
+  10. Frontend calls `refreshPaymentStatus()` to update plan status
+- **Environment Variables Required**:
+  - Frontend: `VITE_STRIPE_PUBLISHABLE_KEY` (pk_test_... or pk_live_...)
+  - Backend: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 - **Payment Status API**: `GET /api/stripe/payment-status`
   - Returns: `{ hasActivePlan: boolean, plan: 'student' | 'enterprise' | null, status: string }`
   - Called by AuthContext on login and when `refreshPaymentStatus()` is invoked
 - **Access Control**: Without an active subscription, users can make commits but cannot pull from cloud storage
-- **Dashboard**: Users can select their plan via the Dashboard page (`/dashboard`)
+- **Dashboard**: Users can compare plans via the Dashboard page (`/dashboard`)
+- **Checkout**: Users complete payment via the Checkout page (`/checkout`)
 - **Verification**: `hasVerifiedPlan` property in AuthContext indicates if user has an active subscription
 - **Restrictions**: 
   - Commits: Always allowed (local operations)
@@ -1006,10 +1040,11 @@ npm run electron:dist   # Alternative: explicit dist build
 
 - **Database**: Supabase PostgreSQL (`subscriptions` table is active for payments; projects/commits/branches tables exist but unused)
 - **File Storage**: AWS S3 with versioning enabled (backend API ready)
-- **Backend API**: S3 operations implemented via Express server
-- **Frontend Integration**: ⚠️ NOT yet implemented - all version control is local
-- **Presigned URLs**: Used for secure upload/download without exposing AWS credentials
-- **Access Control**: Payment status is fetched from backend, but cloud operations not yet available in UI
+- **Backend API**: `/api/aws/*` endpoints implemented (presigned-upload, presigned-download, list-versions, delete-version)
+- **Frontend API Client**: `awsS3API` class exists in `src/lib/aws-api.ts` but is **NEVER IMPORTED OR CALLED**
+- **FilesAPI Client**: `filesAPI` class exists but backend `/files/*` endpoints **DON'T EXIST**
+- **Frontend Integration**: ❌ NOT implemented - `VersionControlContext` does NOT call any AWS functions
+- **Current State**: All version control is 100% local via `0studio_{filename}/` folder - no cloud features are functional
 
 ### 3D Scene Management
 
@@ -1164,34 +1199,51 @@ npm run electron:dist   # Alternative: explicit dist build
 5. VersionControlContext.onFileChanged handler:
    - Marks hasUnsavedChanges = true
 
-### Stripe Payment Flow
+### Stripe Payment Flow (Embedded Checkout)
 
+```
+1. User signs up (email or Google OAuth)
+   ↓
+2. AuthContext detects new user without subscription
+   ↓
+3. Auto-redirect to /checkout with default Student plan
+   ↓
+4. Checkout page calls POST /api/stripe/create-subscription-intent
+   ↓
+5. Backend creates Stripe customer (if new) and subscription with PaymentIntent
+   ↓
+6. Backend stores pending subscription in Supabase
+   ↓
+7. Checkout page receives clientSecret and renders Stripe PaymentElement
+   ↓
+8. User enters payment details in embedded form (stays in Electron app)
+   ↓
+9. User clicks "Subscribe" → stripe.confirmPayment() called
+   ↓
+10. Stripe processes payment
+   ↓
+11. Stripe sends webhook: invoice.payment_succeeded
+   ↓
+12. Backend webhook handler updates subscription status to 'active' in Supabase
+   ↓
+13. Checkout page detects success and navigates to Dashboard
+   ↓
+14. Dashboard calls refreshPaymentStatus() in AuthContext
+   ↓
+15. AuthContext calls GET /api/stripe/payment-status
+   ↓
+16. AuthContext updates paymentPlan state
+   ↓
+17. User now has access to all features
+```
+
+**Alternative Flow (Dashboard Plan Selection)**:
 ```
 1. User clicks plan in Dashboard
    ↓
-2. Dashboard calls POST /api/stripe/create-checkout-session
+2. Dashboard navigates to /checkout?plan={plan}&priceId={priceId}&price={price}
    ↓
-3. Backend creates Stripe Checkout Session with user metadata
-   ↓
-4. User redirected to Stripe Checkout page
-   ↓
-5. User completes payment
-   ↓
-6. Stripe sends webhook event: customer.subscription.created
-   ↓
-7. Backend webhook handler creates/updates subscription in Supabase
-   ↓
-8. User redirected back to Dashboard with success=true
-   ↓
-9. Dashboard calls refreshPaymentStatus() in AuthContext
-   ↓
-10. AuthContext calls GET /api/stripe/payment-status
-   ↓
-11. Backend queries Supabase subscriptions table
-   ↓
-12. AuthContext updates paymentPlan state
-   ↓
-13. User now has access to all features
+3. (Same as steps 4-17 above)
 ```
 
 ---
@@ -1206,11 +1258,16 @@ This section documents features that are partially implemented or have known gap
 - **Workaround**: Version control works via local `tree.json` and commit files
 - **Fix Required**: Add `ipcMain.handle()` calls in main.ts that use GitService
 
-### Cloud Sync (Backend Only)
-- **Issue**: Backend API for AWS S3 and Supabase is implemented, but frontend integration is missing
-- **Impact**: All version control is local only
-- **Workaround**: N/A - local storage works fine
-- **Fix Required**: Add cloud sync methods to VersionControlContext when cloud features are needed
+### Cloud Sync (Dead Code)
+- **Issue**: Frontend AWS client (`awsS3API`) exists in `src/lib/aws-api.ts` but is NEVER IMPORTED or used anywhere
+- **Backend Status**: `/api/aws/*` endpoints exist and are functional
+- **Frontend Status**: `awsS3API` class is dead code - never called from `VersionControlContext` or anywhere else
+- **FilesAPI Issue**: `filesAPI` class expects `/files/*` backend endpoints that DON'T EXIST
+- **Impact**: All version control is 100% local only - no cloud features work
+- **Fix Required**: 
+  1. Import `awsS3API` in `VersionControlContext`
+  2. Add push/pull methods that call `awsS3API.uploadFile()` and `awsS3API.downloadFile()`
+  3. Store S3 version IDs in commits for cloud versioning
 
 ### ProjectInfo Interface Inconsistency
 - **Issue**: `getCurrentProject()` in main.ts returns `{filePath, fileName}` but desktop-api.ts expects `{filePath, projectDir, fileName}`
@@ -1219,9 +1276,101 @@ This section documents features that are partially implemented or have known gap
 
 ---
 
+## Implementation Status Tracker
+
+### Core Features
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| 3D Model Viewer | ✅ Implemented | Three.js + React Three Fiber |
+| .3dm File Loading | ✅ Implemented | rhino3dm service |
+| File Watching | ✅ Implemented | Auto-reload on Rhino save |
+| Local Version Control | ✅ Implemented | tree.json + commit files |
+| Branching System | ✅ Implemented | Auto-branch on non-head commit |
+| Gallery Mode | ✅ Implemented | Up to 4 commits side-by-side |
+| macOS Build | ✅ Implemented | DMG for x64 and arm64 |
+
+### Authentication & Payments
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Supabase Auth | ✅ Implemented | Email + Google OAuth |
+| Sign Up Flow | ✅ Implemented | Auto-redirect to checkout |
+| Sign In Flow | ✅ Implemented | With subscription check |
+| Password Reset | ✅ Implemented | Email-based |
+| Stripe Subscriptions | ✅ Implemented | Student and Enterprise plans |
+| Embedded Checkout | ✅ Implemented | Stripe Elements in-app |
+| Webhook Handling | ✅ Implemented | Subscription lifecycle events |
+| Payment Status API | ✅ Implemented | Backend endpoint |
+
+### Cloud Features
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| AWS S3 Backend API | ✅ Implemented | `/api/aws/*` endpoints work |
+| AWS S3 Frontend Client | ⚠️ Exists but NOT USED | `awsS3API` class in `aws-api.ts` - never imported |
+| FilesAPI Frontend Client | ❌ Not Working | `filesAPI` class exists but `/files/*` backend endpoints DON'T EXIST |
+| Supabase Database | ⚠️ Partial | `subscriptions` table active; projects/commits tables unused |
+| Cloud Sync (Push) | ❌ Not Implemented | Backend ready, frontend never calls it |
+| Cloud Sync (Pull) | ❌ Not Implemented | Backend ready, frontend never calls it |
+| Cloud Collaboration | ❌ Not Implemented | Multi-user features planned |
+
+### Git Integration
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| GitService Class | ⚠️ Partial | Exists but not connected to IPC |
+| Git IPC Handlers | ❌ Not Implemented | Exposed in preload, not in main |
+| Git Commit/Push/Pull | ❌ Not Implemented | Using local tree.json instead |
+
+### UI Components
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| TitleBar | ✅ Implemented | macOS-style with user menu |
+| VersionControl Panel | ✅ Implemented | Branch tree, commit history |
+| ModelViewer | ✅ Implemented | Interactive 3D with orbit controls |
+| Dashboard | ✅ Implemented | Plan selection UI |
+| Checkout Page | ✅ Implemented | Stripe Elements embedded form |
+| Auth Dialog | ✅ Implemented | Login/Signup tabs |
+| User Menu | ✅ Implemented | Dropdown with Dashboard/Sign Out |
+
+---
+
 ## Recent Updates & Features
 
-### macOS App Build (Latest - v1.3.0)
+### Custom Stripe Checkout (v1.4.0 - Latest)
+
+**Embedded Checkout Page**:
+- New `/checkout` route with Stripe Elements integration
+- Payment form stays entirely within Electron app (no external redirect)
+- Uses `@stripe/react-stripe-js` PaymentElement component
+- Two-column layout: plan summary on left, payment form on right
+- Shows plan features, price, and secure payment input
+- "Compare all plans" button to return to Dashboard
+- "Back to app" button to skip checkout
+
+**Auto-Redirect to Checkout**:
+- New users without subscription are automatically redirected to `/checkout` after sign up
+- Default Student plan ($10/mo) pre-selected
+- Works for both email sign up and Google OAuth
+- Uses `justSignedInRef` to track fresh sign-ins
+
+**New Backend Endpoint**:
+- `POST /api/stripe/create-subscription-intent` creates subscription with PaymentIntent
+- Creates Stripe customer if not exists
+- Uses `payment_behavior: 'default_incomplete'` for embedded flow
+- Returns `clientSecret` for Stripe Elements
+
+**Webhook Enhancements**:
+- Added `invoice.payment_succeeded` handler to activate subscriptions
+- Added `invoice.payment_failed` handler to mark subscriptions as past_due
+- Subscription status flows: pending → active (on payment success)
+
+**Environment Variables**:
+- `VITE_STRIPE_PUBLISHABLE_KEY` required for frontend Stripe Elements
+
+### macOS App Build (v1.3.0)
 
 **Production Build Configuration**:
 - **Custom App Icon**: 1024x1024 PNG icon (`0studio_mac_icon.png`) with auto-conversion to .icns
@@ -1288,11 +1437,14 @@ This section documents features that are partially implemented or have known gap
 - **State Management**: Proper reset when project is closed
 - **UI**: Checkboxes with disabled state when limit reached
 
-### Cloud Storage Integration (Backend Ready, Frontend Pending)
+### Cloud Storage Integration (Backend Ready, Frontend NOT Connected)
 - **Supabase**: Database tables exist for projects and commits, but NOT integrated with frontend
-- **AWS S3**: Backend API for file storage with versioning is implemented
-- **Payment Gating**: Payment status is checked via backend API, but cloud pull/push not yet implemented in frontend
-- **Current Status**: All version control is local via `0studio_{filename}/` folder. Cloud sync is planned for future release.
+- **AWS S3 Backend**: `/api/aws/*` endpoints implemented and functional (presigned URLs, versioning)
+- **AWS S3 Frontend**: `awsS3API` class exists in `aws-api.ts` but is **NEVER IMPORTED** anywhere
+- **FilesAPI**: `filesAPI` class exists but backend `/files/*` endpoints **DON'T EXIST**
+- **Payment Gating**: Payment status is checked via backend API
+- **Current Status**: All version control is 100% local via `0studio_{filename}/` folder. No cloud features work.
+- **To Enable**: Import `awsS3API` in `VersionControlContext` and wire up push/pull methods
 
 ### Payment System
 - **Stripe Integration**: Full subscription management
@@ -1315,6 +1467,9 @@ This section documents features that are partially implemented or have known gap
 - `VITE_BACKEND_URL`: Backend API URL (defaults to `http://localhost:3000`)
   - Used for both AWS S3 operations and Stripe payment operations
   - Can also use `VITE_AWS_API_URL` for backward compatibility
+- `VITE_STRIPE_PUBLISHABLE_KEY`: Stripe publishable key (required for checkout)
+  - Test mode: `pk_test_...`
+  - Live mode: `pk_live_...`
 
 ### Backend
 - `AWS_ACCESS_KEY_ID`: AWS access key
@@ -1337,18 +1492,26 @@ This section documents features that are partially implemented or have known gap
 1. **Check existing contexts**: ModelContext, VersionControlContext, AuthContext
 2. **Use desktop-api.ts**: For Electron IPC, don't call window.electronAPI directly
 3. **Scene manipulation**: Use ModelContext methods (addPrimitive, transformObject, etc.)
-5. **Cloud operations**: Backend API ready (supabase-api.ts, aws-api.ts exist) but frontend integration NOT implemented
+5. **Cloud operations**: 
+   - Backend API `/api/aws/*` endpoints exist and work
+   - Frontend `awsS3API` class exists but is NEVER IMPORTED or used
+   - Frontend `filesAPI` class exists but backend `/files/*` endpoints DON'T EXIST
+   - To enable cloud sync: import `awsS3API` in `VersionControlContext` and call its methods
 6. **Authentication**: Use AuthContext and check user state - works for payment plans
 7. **Payment plans**: 
    - Payment plans managed via Stripe subscriptions stored in Supabase `subscriptions` table
    - Use `refreshPaymentStatus()` in AuthContext to reload payment status from backend
+   - New users auto-redirect to `/checkout` after sign up (handled in AuthContext)
+   - Checkout page uses Stripe Elements for embedded payment (no external redirect)
+   - Requires `VITE_STRIPE_PUBLISHABLE_KEY` environment variable
 8. **UI components**: Prefer Shadcn UI from `src/components/ui/`
 9. **Forms**: Use Shadcn Forms pattern
 10. **State management**: Use contexts for global state, useState for local
 11. **Provider dependencies**: 
     - `ModelProvider` requires `VersionControlProvider` (ModelProvider uses useVersionControl internally)
     - Always wrap pages with both providers if using ModelProvider
-    - Dashboard page requires both providers for TitleBar to work correctly
+    - Dashboard and Checkout pages require both providers for TitleBar to work correctly
+    - Checkout page wraps its return statements with providers (not at route level)
 12. **UserMenu**: Clicking user email in TitleBar opens dropdown menu with Dashboard and Sign Out options
 13. **Gallery Mode**: 
     - Maximum 4 commits can be selected
