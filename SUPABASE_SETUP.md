@@ -73,10 +73,46 @@ create table if not exists project_members (
 );
 
 -- ============================================================
+-- SUBSCRIPTIONS TABLE (for Stripe payment integration)
+-- ============================================================
+
+-- 5. Subscriptions: User payment subscriptions (managed by Stripe webhooks)
+create table if not exists subscriptions (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  plan text not null check (plan in ('student', 'enterprise')),
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  status text not null default 'active' check (status in ('active', 'canceled', 'past_due', 'trialing')),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique(user_id)
+);
+
+-- Enable Row Level Security on subscriptions
+alter table subscriptions enable row level security;
+
+-- Policy: Users can view their own subscriptions
+create policy "Users can view their own subscriptions"
+  on subscriptions for select
+  using (auth.uid() = user_id);
+
+-- Policy: Service role can manage all subscriptions (for webhooks)
+-- Note: This requires using service_role key in backend
+create policy "Service role can manage subscriptions"
+  on subscriptions for all
+  using (true)
+  with check (true);
+
+-- Create indexes for faster lookups
+create index if not exists subscriptions_user_id_idx on subscriptions(user_id);
+create index if not exists subscriptions_stripe_customer_id_idx on subscriptions(stripe_customer_id);
+
+-- ============================================================
 -- LEGACY TABLES - Commits and Branches (for local version control)
 -- ============================================================
 
--- 5. Commits: Each row is ONE file version (legacy, for local VC)
+-- 6. Commits: Each row is ONE file version (legacy, for local VC)
 create table if not exists commits (
   id uuid default gen_random_uuid() primary key,
   project_id uuid references projects(id) on delete cascade,

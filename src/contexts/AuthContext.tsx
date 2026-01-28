@@ -1,5 +1,5 @@
 // Authentication context using Supabase
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { toast } from 'sonner';
@@ -32,6 +32,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [paymentPlan, setPaymentPlanState] = useState<PaymentPlan>(null);
+  const [paymentPlanLoaded, setPaymentPlanLoaded] = useState(false);
+  
+  // Track if user just signed in (to redirect to dashboard if no subscription)
+  const justSignedInRef = useRef(false);
 
   const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
@@ -39,6 +43,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const loadPaymentPlan = useCallback(async () => {
     if (!user || !session?.access_token) {
       setPaymentPlanState(null);
+      setPaymentPlanLoaded(false);
       return;
     }
 
@@ -66,6 +71,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Fall back to localStorage
       const stored = localStorage.getItem(`paymentPlan_${user.id}`);
       setPaymentPlanState((stored as PaymentPlan) || null);
+    } finally {
+      setPaymentPlanLoaded(true);
     }
   }, [user, session, BACKEND_URL]);
 
@@ -73,6 +80,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     loadPaymentPlan();
   }, [loadPaymentPlan]);
+
+  // Redirect to checkout if user just signed in and doesn't have a subscription
+  useEffect(() => {
+    if (justSignedInRef.current && paymentPlanLoaded && user) {
+      justSignedInRef.current = false; // Reset the flag
+      
+      if (!paymentPlan) {
+        // User just signed in but has no active subscription
+        // Redirect directly to checkout page with default Student plan
+        console.log('User signed in without subscription, redirecting to checkout...');
+        toast.info('Complete your subscription to get started', {
+          description: 'Choose a plan to unlock all features.',
+        });
+        
+        // Use window.location for navigation since we're outside React Router
+        // Check if not already on checkout or dashboard to avoid redirect loop
+        const currentPath = window.location.hash || window.location.pathname;
+        if (!currentPath.includes('/checkout') && !currentPath.includes('/dashboard')) {
+          // Default to Student plan at $10/mo - user can go to dashboard to see other options
+          window.location.href = '#/checkout?plan=student&priceId=price_1SpIuQBU9neqC79tYoTbDCck&price=10';
+        }
+      }
+    }
+  }, [paymentPlanLoaded, paymentPlan, user]);
 
   useEffect(() => {
     // Get initial session
@@ -85,10 +116,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      
+      // Detect OAuth sign-in (Google auth redirects back with SIGNED_IN event)
+      if (event === 'SIGNED_IN' && session) {
+        // Check if this is a fresh OAuth sign-in by looking at URL params
+        // OAuth redirects include fragments like #access_token=...
+        const urlHash = window.location.hash;
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        // If URL contains auth tokens/params, this is likely a fresh OAuth sign-in
+        if (urlHash.includes('access_token') || urlParams.has('code')) {
+          console.log('OAuth sign-in detected, marking for subscription check');
+          justSignedInRef.current = true;
+        }
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -114,6 +159,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         toast.success('Account created! Please check your email to verify your account.');
       } else if (data.session) {
         // User is automatically signed in (if email confirmation is disabled)
+        // Mark that user just signed in (for subscription redirect check)
+        justSignedInRef.current = true;
         toast.success('Account created successfully!');
       }
 
@@ -136,6 +183,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return { error };
       }
 
+      // Mark that user just signed in (for subscription redirect check)
+      justSignedInRef.current = true;
+      
       toast.success('Signed in successfully');
       return { error: null };
     } catch (error) {

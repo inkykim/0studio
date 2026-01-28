@@ -417,6 +417,50 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
 
   // Handle the event
   switch (event.type) {
+    case 'invoice.payment_succeeded':
+      const invoice = event.data.object;
+      
+      // When payment succeeds, update subscription status to active
+      if (invoice.subscription) {
+        console.log('💰 Invoice payment succeeded for subscription:', invoice.subscription);
+        
+        const { error: updateError } = await supabase
+          .from('subscriptions')
+          .update({
+            status: 'active',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('stripe_subscription_id', invoice.subscription);
+
+        if (updateError) {
+          console.error('Error updating subscription status to active:', updateError);
+        } else {
+          console.log('✅ Subscription marked as active');
+        }
+      }
+      break;
+
+    case 'invoice.payment_failed':
+      const failedInvoice = event.data.object;
+      
+      // When payment fails, update subscription status
+      if (failedInvoice.subscription) {
+        console.log('❌ Invoice payment failed for subscription:', failedInvoice.subscription);
+        
+        const { error: failError } = await supabase
+          .from('subscriptions')
+          .update({
+            status: 'past_due',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('stripe_subscription_id', failedInvoice.subscription);
+
+        if (failError) {
+          console.error('Error updating subscription status to past_due:', failError);
+        }
+      }
+      break;
+
     case 'customer.subscription.created':
       const newSubscription = event.data.object;
       
@@ -589,6 +633,116 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
   }
 
   res.json({ received: true });
+});
+
+// Create Subscription Intent for custom checkout
+app.post('/api/stripe/create-subscription-intent', verifyAuth, async (req, res) => {
+  try {
+    const { price_id, plan } = req.body;
+    
+    if (!price_id) {
+      return res.status(400).json({ error: 'Missing price_id parameter' });
+    }
+
+    console.log('💳 Creating subscription intent for:', {
+      priceId: price_id,
+      plan: plan,
+      userEmail: req.user.email,
+      userId: req.user.id
+    });
+
+    // Check if customer already exists
+    let customer;
+    const existingCustomers = await stripe.customers.list({
+      email: req.user.email,
+      limit: 1,
+    });
+
+    if (existingCustomers.data.length > 0) {
+      customer = existingCustomers.data[0];
+      console.log('✅ Found existing customer:', customer.id);
+    } else {
+      // Create a new customer
+      customer = await stripe.customers.create({
+        email: req.user.email,
+        metadata: {
+          userId: req.user.id,
+        },
+      });
+      console.log('✅ Created new customer:', customer.id);
+    }
+
+    // Retrieve the price to get the amount
+    let price;
+    try {
+      price = await stripe.prices.retrieve(price_id);
+    } catch (error) {
+      console.error('❌ Price not found:', price_id);
+      return res.status(404).json({ 
+        error: 'Price not found',
+        price_id: price_id,
+        hint: 'Check that the price_id is correct in your Stripe Dashboard'
+      });
+    }
+
+    // Create a subscription with payment_behavior: 'default_incomplete'
+    // This creates a subscription that requires payment confirmation
+    const subscription = await stripe.subscriptions.create({
+      customer: customer.id,
+      items: [{ price: price_id }],
+      payment_behavior: 'default_incomplete',
+      payment_settings: { save_default_payment_method: 'on_subscription' },
+      expand: ['latest_invoice.payment_intent'],
+      metadata: {
+        userId: req.user.id,
+        plan: plan || 'student',
+      },
+    });
+
+    // Get the client secret from the payment intent
+    const invoice = subscription.latest_invoice;
+    const paymentIntent = invoice?.payment_intent;
+
+    if (!paymentIntent || typeof paymentIntent === 'string') {
+      throw new Error('Failed to create payment intent for subscription');
+    }
+
+    console.log('✅ Subscription created:', subscription.id);
+    console.log('✅ Payment intent created:', paymentIntent.id);
+
+    // Store the subscription in our database (pending status until payment completes)
+    const { error: dbError } = await supabase
+      .from('subscriptions')
+      .upsert({
+        user_id: req.user.id,
+        plan: plan || 'student',
+        stripe_customer_id: customer.id,
+        stripe_subscription_id: subscription.id,
+        status: 'pending',
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id',
+      });
+
+    if (dbError) {
+      console.error('Warning: Failed to store subscription in database:', dbError);
+      // Don't fail the request, just log the warning
+    }
+
+    res.json({
+      subscriptionId: subscription.id,
+      clientSecret: paymentIntent.client_secret,
+    });
+  } catch (error) {
+    console.error('❌ Error creating subscription intent:', error);
+    console.error('   Error type:', error.type);
+    console.error('   Error message:', error.message);
+    
+    res.status(500).json({ 
+      error: 'Failed to create subscription',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 });
 
 // Get user's payment status

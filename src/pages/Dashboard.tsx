@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useAuth } from "@/contexts/AuthContext";
 import { InteractivePricingCard } from '@/components/ui/pricing';
 import { TitleBar } from "@/components/TitleBar";
@@ -9,13 +9,10 @@ import { ArrowLeft } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-
 export default function Dashboard() {
-  const { user, paymentPlan, hasVerifiedPlan, refreshPaymentStatus } = useAuth();
+  const { user, paymentPlan, refreshPaymentStatus } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [loading, setLoading] = useState<string | null>(null);
 
   // Handle success/cancel from Stripe redirect
   useEffect(() => {
@@ -33,87 +30,6 @@ export default function Dashboard() {
     }
   }, [searchParams, navigate, refreshPaymentStatus]);
 
-  const handleCheckout = async (lookupKey: string | null, planName: string, priceId?: string) => {
-    if (!user) {
-      toast.error('Please sign in to continue');
-      return;
-    }
-
-    const loadingKey = lookupKey || priceId || 'checkout';
-    setLoading(loadingKey);
-    try {
-      const { supabase } = await import('@/lib/supabase');
-      
-      // Get current session
-      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) {
-        console.error('Session error:', sessionError);
-        throw new Error('Failed to get session');
-      }
-      
-      // If no session or expired, try to refresh
-      if (!session) {
-        throw new Error('Not authenticated. Please sign in again.');
-      }
-      
-      // Check if token is expired (basic check)
-      if (session.expires_at && session.expires_at < Date.now() / 1000) {
-        console.log('Token expired, refreshing...');
-        const { data: { session: newSession }, error: refreshError } = await supabase.auth.refreshSession();
-        if (refreshError || !newSession) {
-          throw new Error('Session expired. Please sign in again.');
-        }
-        session = newSession;
-      }
-      
-      if (!session?.access_token) {
-        throw new Error('Not authenticated. Please sign in again.');
-      }
-      
-      console.log('Making request to:', `${BACKEND_URL}/api/stripe/create-checkout-session`);
-      
-      const requestBody: { lookup_key?: string; price_id?: string } = {};
-      if (lookupKey) {
-        requestBody.lookup_key = lookupKey;
-      } else if (priceId) {
-        requestBody.price_id = priceId;
-      }
-      
-      const response = await fetch(`${BACKEND_URL}/api/stripe/create-checkout-session`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        const errorMessage = error.error || 'Failed to create checkout session';
-        if (error.hint) {
-          console.error('Stripe error:', error);
-          throw new Error(`${errorMessage}. ${error.hint}`);
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      
-      // Redirect to Stripe Checkout
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error('No checkout URL received');
-      }
-    } catch (error) {
-      console.error('Checkout error:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to start checkout');
-      setLoading(null);
-    }
-  };
-
   const studentPlanFeatures = [
     'Unlimited commits',
     'File tree visualization',
@@ -129,18 +45,19 @@ export default function Dashboard() {
     'Priority support',
   ];
 
-  const handlePlanSelect = async (planName: string, units: number, totalPrice: number) => {
+  const handlePlanSelect = (planName: string, units: number, totalPrice: number) => {
     if (!user) {
       toast.error('Please sign in to continue');
       return;
     }
 
-    // Determine the price ID and lookup key based on plan
-    const priceId = planName.toLowerCase() === 'student' ? 'price_1SpIuQBU9neqC79tYoTbDCck' : undefined;
-    const lookupKey = planName.toLowerCase() === 'enterprise' ? '0studio_Fricionless_-_Enterprise-XXXXX' : null;
-    
-    // Call the handleCheckout function with Stripe integration
-    await handleCheckout(lookupKey, planName.toLowerCase(), priceId);
+    // Determine the price ID based on plan
+    const priceId = planName.toLowerCase() === 'student' 
+      ? 'price_1SpIuQBU9neqC79tYoTbDCck' 
+      : 'price_enterprise'; // Update with your actual enterprise price ID
+
+    // Navigate to custom checkout page with plan details
+    navigate(`/checkout?plan=${planName.toLowerCase()}&priceId=${priceId}&price=${totalPrice}`);
   };
 
   return (
@@ -180,7 +97,7 @@ export default function Dashboard() {
                 unitName="user"
                 minUnits={1}
                 maxUnits={10}
-                initialUnits={3}
+                initialUnits={1}
                 features={studentPlanFeatures}
                 ctaText="Get Started with Student"
                 hideSlider={true}

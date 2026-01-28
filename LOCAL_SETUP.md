@@ -2,6 +2,8 @@
 
 Quick guide to get Stripe checkout working locally.
 
+> **For a more comprehensive guide** including subscription gating testing, Stripe CLI webhooks, and troubleshooting, see [`LOCAL_DEV_SETUP.md`](./LOCAL_DEV_SETUP.md).
+
 ## Step 1: Start the Backend Server
 
 ```bash

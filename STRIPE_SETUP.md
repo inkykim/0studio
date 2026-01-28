@@ -114,3 +114,33 @@ cd ..
 npm install @stripe/stripe-js
 ```
 
+## Subscription-Gated Features
+
+The subscription system is integrated with feature access control. See:
+
+- **`SUBSCRIPTION_GATING_SETUP.md`** - Complete setup guide for subscription-gated features
+- **`SUBSCRIPTION_RLS_POLICY.sql`** - Database-level security policies
+- **`src/lib/subscription-service.ts`** - Helper functions for checking subscription status
+
+Features currently gated by subscription:
+- ✅ 3D Model Import (requires active subscription)
+
+The implementation includes three layers of protection:
+1. Frontend UI checks (UX)
+2. Backend API validation (security)
+3. Database RLS policies (defense-in-depth)
+
+## Production Deployment
+
+For deploying the backend to production (required for Homebrew distribution), see:
+
+- **`AWS_BACKEND_DEPLOYMENT.md`** - Complete guide for deploying to AWS App Runner
+
+### Quick Checklist for Production
+
+1. Deploy backend to AWS (see `AWS_BACKEND_DEPLOYMENT.md`)
+2. Update `VITE_BACKEND_URL` to your AWS URL
+3. Create production Stripe webhook pointing to AWS backend
+4. Switch to live Stripe keys (`pk_live_`, `sk_live_`)
+5. Rebuild app with `npm run build:all`
+

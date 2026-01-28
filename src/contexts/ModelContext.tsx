@@ -15,6 +15,9 @@ import {
 } from "@/lib/rhino3dm-service";
 import { desktopAPI } from "@/lib/desktop-api";
 import { useVersionControl } from "./VersionControlContext";
+import { checkSubscriptionStatus } from "@/lib/subscription-service";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
 
 // Serializable representation of a 3D object for storage
 export interface SerializedObject {
@@ -151,6 +154,26 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     const handleProjectOpened = async (project: { filePath: string; fileName: string }) => {
       console.log('Project opened via native dialog:', project);
       
+      // Check authentication
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast.error('Authentication Required', {
+          description: 'Please sign in to import 3D models.',
+        });
+        return;
+      }
+
+      // Check subscription status
+      const hasActiveSubscription = await checkSubscriptionStatus();
+      
+      if (!hasActiveSubscription) {
+        toast.error('Subscription Required', {
+          description: 'An active subscription is required to import 3D models. Please subscribe to continue.',
+        });
+        return;
+      }
+      
       setIsLoading(true);
       setError(null);
 
@@ -178,10 +201,15 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         // Create initial commit for version control with exact file buffer
         await createInitialCommit(result, arrayBuffer, filePath);
         console.log('Created initial commit for model opened via native dialog');
+        
+        toast.success('Model imported successfully');
 
       } catch (err) {
         console.error('Failed to load 3DM file:', err);
         setError(err instanceof Error ? err.message : 'Failed to load file');
+        toast.error('Failed to import model', {
+          description: err instanceof Error ? err.message : "An error occurred",
+        });
       } finally {
         setIsLoading(false);
       }
@@ -443,8 +471,31 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   }, [generatedObjects]);
 
   const importFile = useCallback(async (file: File) => {
+    // 1. Validate file type
     if (!file.name.toLowerCase().endsWith(".3dm")) {
       setError("Please select a valid .3dm file");
+      return;
+    }
+
+    // 2. Check authentication
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      toast.error('Authentication Required', {
+        description: 'Please sign in to import 3D models.',
+      });
+      setError("Authentication required");
+      return;
+    }
+
+    // 3. Check subscription status
+    const hasActiveSubscription = await checkSubscriptionStatus();
+    
+    if (!hasActiveSubscription) {
+      toast.error('Subscription Required', {
+        description: 'An active subscription is required to import 3D models. Please subscribe to continue.',
+      });
+      setError("Subscription required");
       return;
     }
 
@@ -476,9 +527,14 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       await createInitialCommit(result, fileBuffer, filePath);
       console.log('Created initial commit for imported model with file buffer:', fileBuffer.byteLength, 'bytes');
       
+      toast.success('Model imported successfully');
+      
     } catch (err) {
       console.error("Failed to load 3DM file:", err);
       setError(err instanceof Error ? err.message : "Failed to load file");
+      toast.error('Failed to import model', {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
     } finally {
       setIsLoading(false);
     }
