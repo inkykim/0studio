@@ -31,6 +31,27 @@ This guide walks you through deploying the 0studio backend server to AWS so that
 - AWS CLI installed (`brew install awscli`)
 - Docker installed (for App Runner)
 - Your backend code ready in `backend/` folder
+- IAM user with appropriate permissions (see below)
+
+### Important: AWS Region
+
+**Throughout this guide, replace `us-east-1` with your actual AWS region** (e.g., `us-east-2`, `eu-west-1`, etc.). 
+
+To check your configured region:
+```bash
+aws configure get region
+```
+
+All AWS resources (ECR, App Runner, S3) should be in the **same region** for best performance.
+
+### IAM Permissions Required
+
+Your IAM user needs these permissions:
+- **ECR Access**: `AmazonEC2ContainerRegistryFullAccess` (to create repositories and push images)
+- **App Runner Access**: `AWSAppRunnerFullAccess` (to create and manage App Runner services)
+- **S3 Access**: For your backend to access S3 buckets
+
+If you get "AccessDeniedException" errors, go to IAM Console → Users → Your User → Add permissions → Attach these policies.
 
 ## Option 1: AWS App Runner (Recommended - Simplest)
 
@@ -78,27 +99,38 @@ node_modules
 
 ### Step 3: Push to Amazon ECR (Elastic Container Registry)
 
+**⚠️ IMPORTANT: Use the same region consistently throughout this guide. Replace `us-east-1` with your actual region (e.g., `us-east-2`) if different.**
+
 ```bash
 # Configure AWS CLI (if not already done)
 aws configure
-# Enter your AWS Access Key ID, Secret Access Key, region (e.g., us-east-1)
+# Enter your AWS Access Key ID, Secret Access Key, region (e.g., us-east-1 or us-east-2)
 
-# Create ECR repository
+# Create ECR repository (replace us-east-1 with your region)
 aws ecr create-repository --repository-name 0studio-backend --region us-east-1
 
-# Get the repository URI (save this!)
-aws ecr describe-repositories --repository-names 0studio-backend --query 'repositories[0].repositoryUri' --output text
-# Output: 123456789.dkr.ecr.us-east-1.amazonaws.com/0studio-backend
+# Get the repository URI (SAVE THIS!)
+aws ecr describe-repositories --repository-names 0studio-backend --region us-east-1 --query 'repositories[0].repositoryUri' --output text
+# Output example: 123456789.dkr.ecr.us-east-1.amazonaws.com/0studio-backend
 
-# Login to ECR
+# IMPORTANT: Note your AWS Account ID and region from the output above
+# Format: {ACCOUNT_ID}.dkr.ecr.{REGION}.amazonaws.com/0studio-backend
+
+# Login to ECR (make sure REGION in command matches REGION in URL)
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789.dkr.ecr.us-east-1.amazonaws.com
 
 # Build and push (from backend/ folder)
 cd backend
 docker build --platform linux/amd64 -t 0studio-backend .
+
+# Tag the image (use YOUR account ID and region)
 docker tag 0studio-backend:latest 123456789.dkr.ecr.us-east-1.amazonaws.com/0studio-backend:latest
+
+# Push to ECR
 docker push 123456789.dkr.ecr.us-east-1.amazonaws.com/0studio-backend:latest
 ```
+
+**Common Error**: If you get "400 Bad Request" on login, make sure the region in the `--region` flag matches the region in the ECR URL.
 
 ### Step 4: Create App Runner Service
 
@@ -106,26 +138,50 @@ docker push 123456789.dkr.ecr.us-east-1.amazonaws.com/0studio-backend:latest
 
 1. Go to [AWS App Runner Console](https://console.aws.amazon.com/apprunner)
 2. Click **Create service**
-3. Source: **Container registry** → **Amazon ECR**
-4. Select your image: `0studio-backend:latest`
-5. Deployment: **Automatic** (deploys on new image push)
-6. Service settings:
+3. **Source Configuration**:
+   - Repository type: **Container registry** → **Amazon ECR**
+   - Browse and select your image: `0studio-backend:latest`
+   - Deployment: **Automatic** (deploys on new image push)
+   - **ECR access role**: Select **"Create new service role"** (AWS will auto-create `AppRunnerECRAccessRole`)
+   - Click **Next**
+
+4. **Service settings**:
    - Service name: `0studio-backend`
-   - CPU: 0.25 vCPU (can increase later)
-   - Memory: 0.5 GB
+   - CPU: `1 vCPU` (or `0.25 vCPU` for minimal cost)
+   - Memory: `2 GB` (or `0.5 GB` for minimal cost)
    - Port: `3000`
-7. Environment variables (click **Add environment variable**):
+
+5. **Environment variables** (click **Add environment variable** for each):
    ```
+   AWS_ACCESS_KEY_ID = your_aws_access_key
+   AWS_SECRET_ACCESS_KEY = your_aws_secret_key
+   AWS_REGION = us-east-1
+   S3_BUCKET_NAME = 0studio-files
    SUPABASE_URL = https://your-project.supabase.co
    SUPABASE_SERVICE_ROLE_KEY = your_service_role_key
-   STRIPE_SECRET_KEY = sk_live_...
-   STRIPE_WEBHOOK_SECRET = whsec_...
+   STRIPE_SECRET_KEY = sk_test_... (or sk_live_... for production)
+   STRIPE_WEBHOOK_SECRET = whsec_placeholder
    FRONTEND_URL = *
    PORT = 3000
+   NODE_ENV = production
    ```
+   
+   **Note**: Use `whsec_placeholder` for now; we'll update this after creating the Stripe webhook.
+
+6. **Health check** (optional but recommended):
+   - Path: `/health`
+   - Interval: `10 seconds`
+   - Timeout: `5 seconds`
+   - Unhealthy threshold: `3`
+
+7. **Auto scaling** (use defaults or customize):
+   - Min instances: `1`
+   - Max instances: `3`
+   - Max concurrency: `100`
+
 8. Click **Create & deploy**
 9. Wait for deployment (~5 minutes)
-10. Copy your service URL: `https://xxxxx.us-east-1.awsapprunner.com`
+10. Copy your service URL: `https://xxxxx.{your-region}.awsapprunner.com`
 
 **Via AWS CLI:**
 
@@ -318,6 +374,37 @@ App Runner is recommended for simplicity and automatic scaling.
 
 ## Troubleshooting
 
+### ECR AccessDeniedException
+
+**Error**: `User is not authorized to perform: ecr:CreateRepository`
+
+**Solution**: Your IAM user needs ECR permissions.
+1. Go to IAM Console → Users → Your User
+2. Click "Add permissions" → "Attach policies directly"
+3. Search for and attach: `AmazonEC2ContainerRegistryFullAccess`
+4. Retry the command
+
+### Region Mismatch Error
+
+**Error**: `400 Bad Request` when running `docker login`
+
+**Cause**: The region in your `--region` flag doesn't match the region in your ECR URL.
+
+**Solution**: Make sure both match. For example:
+```bash
+# ✅ CORRECT - both use us-east-2
+aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 123456789.dkr.ecr.us-east-2.amazonaws.com
+
+# ❌ WRONG - us-east-1 vs us-east-2 mismatch
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789.dkr.ecr.us-east-2.amazonaws.com
+```
+
+### App Runner Service Role Not Found
+
+**Issue**: "No existing service role" when creating App Runner service
+
+**Solution**: Select "Create new service role" and let AWS auto-create `AppRunnerECRAccessRole`. This role allows App Runner to pull images from ECR.
+
 ### CORS Errors
 
 If you see CORS errors, make sure your backend has:
@@ -351,17 +438,25 @@ app.get('/health', (req, res) => {
 });
 ```
 
+### Environment Variables Not Loading
+
+If your app can't find environment variables:
+1. Verify all env vars are set in App Runner console → Configuration → Environment variables
+2. Make sure there are no extra spaces in variable names or values
+3. Redeploy the service after adding/updating variables
+
 ---
 
 ## Quick Reference
 
 | Item | Value |
 |------|-------|
-| Backend URL | `https://xxxxx.us-east-1.awsapprunner.com` |
+| Backend URL | `https://xxxxx.{your-region}.awsapprunner.com` |
 | Health Check | `GET /health` |
 | Payment Status | `GET /api/stripe/payment-status` |
 | Stripe Webhook | `POST /api/stripe/webhook` |
-| AWS Region | `us-east-1` (or your chosen region) |
+| AWS Region | Use the same region throughout (e.g., `us-east-1`, `us-east-2`) |
+| ECR Repository | `{account-id}.dkr.ecr.{region}.amazonaws.com/0studio-backend` |
 
 ---
 
@@ -376,12 +471,54 @@ app.get('/health', (req, res) => {
 
 ---
 
-## Next Steps
+## Deployment Checklist
 
-1. [ ] Deploy backend to AWS App Runner
-2. [ ] Update `VITE_BACKEND_URL` in `.env`
-3. [ ] Configure Stripe production webhook
-4. [ ] Switch to live Stripe keys
-5. [ ] Rebuild app with `npm run build:all`
-6. [ ] Test full subscription flow
-7. [ ] Distribute via Homebrew
+### 1. AWS Setup
+- [ ] Configure AWS CLI with `aws configure`
+- [ ] Verify IAM permissions (ECR, App Runner, S3)
+- [ ] Note your AWS region and account ID
+
+### 2. ECR Setup
+- [ ] Create ECR repository
+- [ ] Login to ECR with correct region
+- [ ] Build Docker image for linux/amd64
+- [ ] Tag and push image to ECR
+
+### 3. App Runner Setup
+- [ ] Create App Runner service
+- [ ] Select ECR image and create service role
+- [ ] Configure CPU, memory, and port
+- [ ] Add all environment variables (including AWS credentials)
+- [ ] Wait for deployment (~5 minutes)
+- [ ] Test `/health` endpoint
+
+### 4. Stripe Configuration
+- [ ] Create webhook endpoint in Stripe Dashboard
+- [ ] Copy webhook signing secret
+- [ ] Update `STRIPE_WEBHOOK_SECRET` in App Runner
+- [ ] Redeploy service with new secret
+- [ ] Test webhook with Stripe CLI
+
+### 5. Frontend Update
+- [ ] Update `VITE_BACKEND_URL` in root `.env`
+- [ ] Rebuild app with `npm run build:all`
+- [ ] Test full subscription flow
+- [ ] Distribute via Homebrew
+
+### 6. Production Checklist
+- [ ] Switch to live Stripe keys (`sk_live_...`)
+- [ ] Update webhook to use production endpoint
+- [ ] Enable monitoring/alerts in AWS
+- [ ] Document your backend URL for team
+- [ ] Set up S3 bucket if not already done
+
+---
+
+## Success! 🎉
+
+Your backend is now live at: `https://xxxxx.{region}.awsapprunner.com`
+
+Next time you update your backend code:
+1. Push changes to ECR: `docker push ...`
+2. App Runner will auto-deploy (if automatic deployment is enabled)
+3. No other steps needed!
