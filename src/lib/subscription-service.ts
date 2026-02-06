@@ -1,11 +1,18 @@
 // Subscription service for checking user subscription status
 import { supabase } from './supabase';
+import { STRIPE_DISABLED, MOCK_PAYMENT_PLAN } from './feature-flags';
 
 /**
  * Check if the current user has an active subscription
  * @returns Promise<boolean> - true if user has active subscription, false otherwise
  */
 export async function checkSubscriptionStatus(): Promise<boolean> {
+  // When Stripe is disabled, return true if mock plan is set
+  if (STRIPE_DISABLED) {
+    console.log('[Feature Flag] Stripe disabled, returning mock subscription status');
+    return MOCK_PAYMENT_PLAN !== null;
+  }
+
   try {
     // 1. Check if user is authenticated
     const { data: { user } } = await supabase.auth.getUser();
@@ -56,6 +63,16 @@ export async function getSubscriptionDetails(): Promise<{
   plan: 'student' | 'enterprise' | null;
   status: 'active' | 'canceled' | 'past_due' | 'trialing' | null;
 } | null> {
+  // When Stripe is disabled, return mock subscription details
+  if (STRIPE_DISABLED) {
+    console.log('[Feature Flag] Stripe disabled, returning mock subscription details');
+    return {
+      hasActivePlan: MOCK_PAYMENT_PLAN !== null,
+      plan: MOCK_PAYMENT_PLAN,
+      status: MOCK_PAYMENT_PLAN ? 'active' : null,
+    };
+  }
+
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;

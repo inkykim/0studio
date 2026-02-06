@@ -5,9 +5,10 @@ import { TitleBar } from "@/components/TitleBar";
 import { ModelProvider } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Construction } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { STRIPE_DISABLED, MOCK_PAYMENT_PLAN } from "@/lib/feature-flags";
 
 export default function Dashboard() {
   const { user, paymentPlan, refreshPaymentStatus } = useAuth();
@@ -56,6 +57,14 @@ export default function Dashboard() {
       return;
     }
 
+    // When Stripe is disabled, show a message instead of navigating to checkout
+    if (STRIPE_DISABLED) {
+      toast.info('Payments are disabled in this test build', {
+        description: `All features are unlocked. You're simulating the "${MOCK_PAYMENT_PLAN || 'free'}" plan.`,
+      });
+      return;
+    }
+
     const plan = planName.toLowerCase();
     const priceId = plan === 'pro'
       ? 'price_1SpIuQBU9neqC79tYoTbDCck'
@@ -80,13 +89,28 @@ export default function Dashboard() {
                 <ArrowLeft className="w-4 h-4" />
                 Go back to app
               </Button>
+              
+              {/* Stripe disabled banner */}
+              {STRIPE_DISABLED && (
+                <div className="flex items-center justify-center gap-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 px-4 py-2 rounded-lg border border-amber-500/20">
+                  <Construction className="w-4 h-4" />
+                  <span className="text-sm font-medium">
+                    Payments disabled for testing — All features unlocked
+                  </span>
+                </div>
+              )}
+              
               {paymentPlan ? (
                 <p className="text-muted-foreground">
                   Your current plan is: {paymentPlan === 'free' ? 'Free' : paymentPlan === 'pro' || paymentPlan === 'student' ? 'Pro' : 'Enterprise'}
+                  {STRIPE_DISABLED && ' (simulated)'}
                 </p>
               ) : (
                 <p className="text-muted-foreground">
-                  Choose a plan to unlock all features. Without a verified plan, you can make commits but cannot pull from cloud
+                  {STRIPE_DISABLED 
+                    ? 'Payments are disabled. All features are unlocked for testing.'
+                    : 'Choose a plan to unlock all features. Without a verified plan, you can make commits but cannot pull from cloud'
+                  }
                 </p>
               )}
             </div>

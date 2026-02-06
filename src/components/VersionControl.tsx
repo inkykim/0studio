@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3 } from "lucide-react";
+import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3, GitBranch, Network } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { GraphView } from "./GraphView";
 
 const formatTimeAgo = (timestamp: number) => {
   const now = Date.now();
@@ -23,16 +24,8 @@ const formatTimeAgo = (timestamp: number) => {
   return "just now";
 };
 
-// Helper to build tree structure for visualization
-interface CommitNode {
-  commit: ModelCommit;
-  branch: Branch | undefined;
-  children: CommitNode[];
-  x: number; // Column position (0 = main, 1 = first branch, etc.)
-  y: number; // Row position (timeline order)
-}
-
-interface BranchingTreeProps {
+// Simplified list view for commits (no branching tree visualization)
+interface SimpleListProps {
   commits: ModelCommit[];
   branches: Branch[];
   currentCommitId: string | null;
@@ -46,7 +39,7 @@ interface BranchingTreeProps {
   onToggleSelection: (commitId: string) => void;
 }
 
-const BranchingTree = ({
+const SimpleList = ({
   commits,
   branches,
   currentCommitId,
@@ -58,88 +51,13 @@ const BranchingTree = ({
   isGalleryMode,
   selectedCommitIds,
   onToggleSelection,
-}: BranchingTreeProps) => {
-  // Build tree layout
-  const { nodes, connections, maxX } = useMemo(() => {
-    if (commits.length === 0) return { nodes: [], connections: [], maxX: 0 };
+}: SimpleListProps) => {
+  // Sort commits by timestamp (newest first)
+  const sortedCommits = useMemo(() => {
+    return [...commits].sort((a, b) => b.timestamp - a.timestamp);
+  }, [commits]);
 
-    // Sort commits by timestamp (oldest first for building tree)
-    const sortedCommits = [...commits].sort((a, b) => a.timestamp - b.timestamp);
-    
-    // Group commits by branch
-    const branchCommits = new Map<string, ModelCommit[]>();
-    sortedCommits.forEach(commit => {
-      const branchId = commit.branchId || 'main';
-      if (!branchCommits.has(branchId)) {
-        branchCommits.set(branchId, []);
-      }
-      branchCommits.get(branchId)!.push(commit);
-    });
-    
-    // Assign x positions to branches
-    const branchXPositions = new Map<string, number>();
-    const mainBranch = branches.find(b => b.isMain);
-    let currentX = 0;
-    
-    if (mainBranch) {
-      branchXPositions.set(mainBranch.id, currentX);
-      currentX++;
-    }
-    
-    // Sort non-main branches by their origin commit timestamp
-    const nonMainBranches = branches
-      .filter(b => !b.isMain)
-      .sort((a, b) => {
-        const aOrigin = commits.find(c => c.id === a.originCommitId);
-        const bOrigin = commits.find(c => c.id === b.originCommitId);
-        return (aOrigin?.timestamp || 0) - (bOrigin?.timestamp || 0);
-      });
-    
-    nonMainBranches.forEach(branch => {
-      branchXPositions.set(branch.id, currentX);
-      currentX++;
-    });
-    
-    // Build nodes with positions
-    const nodes: CommitNode[] = [];
-    const commitToNode = new Map<string, CommitNode>();
-    
-    // Sort commits by timestamp (newest first for display)
-    const displayOrder = [...commits].sort((a, b) => b.timestamp - a.timestamp);
-    
-    displayOrder.forEach((commit, idx) => {
-      const branch = branches.find(b => b.id === commit.branchId);
-      const x = branchXPositions.get(commit.branchId) || 0;
-      
-      const node: CommitNode = {
-        commit,
-        branch,
-        children: [],
-        x,
-        y: idx,
-      };
-      
-      nodes.push(node);
-      commitToNode.set(commit.id, node);
-    });
-    
-    // Build connections (from child to parent)
-    const connections: { from: CommitNode; to: CommitNode; isBranchPoint: boolean }[] = [];
-    
-    nodes.forEach(node => {
-      if (node.commit.parentCommitId) {
-        const parentNode = commitToNode.get(node.commit.parentCommitId);
-        if (parentNode) {
-          const isBranchPoint = node.x !== parentNode.x;
-          connections.push({ from: node, to: parentNode, isBranchPoint });
-        }
-      }
-    });
-    
-    return { nodes, connections, maxX: currentX - 1 };
-  }, [commits, branches]);
-
-  if (nodes.length === 0) {
+  if (sortedCommits.length === 0) {
     return (
       <div className="text-center py-4">
         <p className="text-xs text-muted-foreground">No versions saved yet</p>
@@ -148,224 +66,128 @@ const BranchingTree = ({
     );
   }
 
-  const nodeHeight = 56; // Height of each commit row
-  const columnWidth = 24; // Width between branch columns
-  const nodeRadius = 5;
-  const svgWidth = (maxX + 1) * columnWidth + 20;
-
   return (
-    <div className="relative">
-      {/* SVG for branch lines */}
-      <svg 
-        className="absolute left-0 top-0 pointer-events-none"
-        width={svgWidth}
-        height={nodes.length * nodeHeight}
-        style={{ overflow: 'visible' }}
-      >
-        {/* Draw connections */}
-        {connections.map((conn, idx) => {
-          const fromX = conn.from.x * columnWidth + 10 + nodeRadius;
-          const fromY = conn.from.y * nodeHeight + nodeRadius + 6;
-          const toX = conn.to.x * columnWidth + 10 + nodeRadius;
-          const toY = conn.to.y * nodeHeight + nodeRadius + 6;
-          
-          const branchColor = conn.from.branch?.color || '#888';
-          
-          if (conn.isBranchPoint) {
-            // Curved connection for branch point
-            const midY = (fromY + toY) / 2;
-            return (
-              <g key={idx}>
-                {/* Horizontal line from branch point */}
-                <line
-                  x1={toX}
-                  y1={toY}
-                  x2={fromX}
-                  y2={toY}
-                  stroke={branchColor}
-                  strokeWidth={2}
-                  strokeDasharray="4 2"
+    <div className="space-y-1">
+      {sortedCommits.map((commit) => {
+        const branch = branches.find((b) => b.id === commit.branchId);
+        const isCurrentCommit = commit.id === currentCommitId;
+        const isPulledCommit = commit.id === pulledCommitId;
+        const versionLabel = getVersionLabel(commit);
+
+        return (
+          <div
+            key={commit.id}
+            className={`flex gap-3 group cursor-pointer rounded-md p-2 transition-colors ${
+              isPulledCommit
+                ? "bg-secondary/30 ring-2 ring-border"
+                : isCurrentCommit
+                ? "bg-primary/10"
+                : "hover:bg-secondary/50"
+            }`}
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest(".star-button")) return;
+              if ((e.target as HTMLElement).closest(".pull-button")) return;
+              if (!isCurrentCommit) onRestoreCommit(commit.id);
+            }}
+            title={
+              isPulledCommit
+                ? "Active working version (pulled)"
+                : isCurrentCommit
+                ? "Current version"
+                : "Click to restore to this version"
+            }
+          >
+            {/* Checkbox for gallery mode */}
+            {isGalleryMode && (
+              <div className="flex items-center">
+                <Checkbox
+                  checked={selectedCommitIds.has(commit.id)}
+                  onCheckedChange={() => onToggleSelection(commit.id)}
+                  disabled={
+                    !selectedCommitIds.has(commit.id) &&
+                    selectedCommitIds.size >= 4
+                  }
+                  title={
+                    !selectedCommitIds.has(commit.id) &&
+                    selectedCommitIds.size >= 4
+                      ? "Maximum of 4 models can be selected for gallery view"
+                      : selectedCommitIds.has(commit.id)
+                      ? "Click to deselect"
+                      : "Click to select for gallery view"
+                  }
                 />
-                {/* Vertical line on the branch */}
-                <line
-                  x1={fromX}
-                  y1={toY}
-                  x2={fromX}
-                  y2={fromY}
-                  stroke={branchColor}
-                  strokeWidth={2}
-                />
-              </g>
-            );
-          } else {
-            // Straight vertical line
-            return (
-              <line
-                key={idx}
-                x1={fromX}
-                y1={fromY}
-                x2={toX}
-                y2={toY}
-                stroke={branchColor}
-                strokeWidth={2}
-              />
-            );
-          }
-        })}
-        
-        {/* Draw nodes */}
-        {nodes.map((node, idx) => {
-          const x = node.x * columnWidth + 10 + nodeRadius;
-          const y = node.y * nodeHeight + nodeRadius + 6;
-          const isCurrentCommit = node.commit.id === currentCommitId;
-          const isPulledCommit = node.commit.id === pulledCommitId;
-          const branchColor = node.branch?.color || '#888';
-          
-          return (
-            <g key={idx}>
-              {/* Outer ring for pulled commit highlight */}
-              {isPulledCommit && (
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={nodeRadius + 4}
-                  fill="none"
-                  stroke="#a3a3a3"
-                  strokeWidth={2}
-                  className="animate-pulse"
-                />
-              )}
-              {/* Node circle */}
-              <circle
-                cx={x}
-                cy={y}
-                r={nodeRadius}
-                fill={isCurrentCommit ? branchColor : 'transparent'}
-                stroke={branchColor}
-                strokeWidth={2}
-              />
-            </g>
-          );
-        })}
-      </svg>
-      
-      {/* Commit items */}
-      <div style={{ marginLeft: svgWidth }}>
-        {nodes.map((node) => {
-          const isCurrentCommit = node.commit.id === currentCommitId;
-          const isPulledCommit = node.commit.id === pulledCommitId;
-          const versionLabel = getVersionLabel(node.commit);
-          
-          return (
-            <div
-              key={node.commit.id}
-              className={`flex gap-3 group cursor-pointer rounded-md p-2 transition-colors ${
-                isPulledCommit 
-                  ? 'bg-secondary/30 ring-2 ring-border' 
-                  : isCurrentCommit 
-                  ? 'bg-primary/10' 
-                  : 'hover:bg-secondary/50'
-              }`}
-              style={{ height: nodeHeight }}
-              onClick={(e) => {
-                if ((e.target as HTMLElement).closest('.star-button')) return;
-                if ((e.target as HTMLElement).closest('.pull-button')) return;
-                if (!isCurrentCommit) onRestoreCommit(node.commit.id);
-              }}
-              title={
-                isPulledCommit 
-                  ? 'Active working version (pulled)' 
-                  : isCurrentCommit 
-                  ? 'Current version' 
-                  : 'Click to restore to this version'
-              }
-            >
-              {/* Checkbox for gallery mode */}
-              {isGalleryMode && (
-                <div className="flex items-center">
-                  <Checkbox
-                    checked={selectedCommitIds.has(node.commit.id)}
-                    onCheckedChange={() => onToggleSelection(node.commit.id)}
-                    disabled={!selectedCommitIds.has(node.commit.id) && selectedCommitIds.size >= 4}
+              </div>
+            )}
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <button
+                    className="star-button p-0.5 hover:bg-secondary rounded transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleStar(commit.id);
+                    }}
                     title={
-                      !selectedCommitIds.has(node.commit.id) && selectedCommitIds.size >= 4
-                        ? 'Maximum of 4 models can be selected for gallery view'
-                        : selectedCommitIds.has(node.commit.id)
-                        ? 'Click to deselect'
-                        : 'Click to select for gallery view'
+                      commit.starred ? "Unstar this commit" : "Star this commit"
                     }
-                  />
-                </div>
-              )}
-              
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <button
-                      className="star-button p-0.5 hover:bg-secondary rounded transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleStar(node.commit.id);
-                      }}
-                      title={node.commit.starred ? 'Unstar this commit' : 'Star this commit'}
+                  >
+                    <Star
+                      className={`w-3.5 h-3.5 ${
+                        commit.starred
+                          ? "fill-foreground text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      } transition-colors`}
+                    />
+                  </button>
+                  <p className="text-sm font-medium truncate">{commit.message}</p>
+                  {isPulledCommit && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1.5 py-0 h-4 bg-secondary/30 text-foreground border-border"
                     >
-                      <Star 
-                        className={`w-3.5 h-3.5 ${
-                          node.commit.starred 
-                            ? 'fill-foreground text-foreground' 
-                            : 'text-muted-foreground hover:text-foreground'
-                        } transition-colors`} 
-                      />
-                    </button>
-                    <p className="text-sm font-medium truncate">{node.commit.message}</p>
-                    {isPulledCommit && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-secondary/30 text-foreground border-border">
-                        working
-                      </Badge>
-                    )}
-                    {isCurrentCommit && !isPulledCommit && (
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-                        current
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {node.branch && !node.branch.isMain && (
-                      <Badge 
-                        variant="outline" 
-                        className="text-[10px] px-1.5 py-0 h-4 border-border text-foreground"
-                      >
-                        {node.branch.name}
-                      </Badge>
-                    )}
-                    <span className="text-code text-xs text-muted-foreground shrink-0">
-                      {versionLabel}
-                    </span>
-                  </div>
+                      working
+                    </Badge>
+                  )}
+                  {isCurrentCommit && !isPulledCommit && (
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] px-1.5 py-0 h-4"
+                    >
+                      current
+                    </Badge>
+                  )}
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {formatTimeAgo(node.commit.timestamp)}
-                </p>
+                <div className="flex items-center gap-1">
+                  <span className="text-code text-xs text-muted-foreground shrink-0">
+                    {versionLabel}
+                  </span>
+                </div>
               </div>
-              
-              {/* Action buttons on hover */}
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                <button
-                  className="pull-button p-1 hover:bg-secondary rounded transition-colors"
-                  onClick={(e) => onPullCommit(node.commit.id, e)}
-                  title="Pull this version to local file (updates file on disk)"
-                >
-                  <Download className="w-3.5 h-3.5 text-muted-foreground hover:text-primary" />
-                </button>
-              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {formatTimeAgo(commit.timestamp)}
+              </p>
             </div>
-          );
-        })}
-      </div>
+
+            {/* Action buttons on hover */}
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+              <button
+                className="pull-button p-1 hover:bg-secondary rounded transition-colors"
+                onClick={(e) => onPullCommit(commit.id, e)}
+                title="Pull this version to local file (updates file on disk)"
+              >
+                <Download className="w-3.5 h-3.5 text-muted-foreground hover:text-primary" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 };
+
+type ViewMode = "list" | "graph";
 
 export const VersionControl = () => {
   const { 
@@ -382,6 +204,7 @@ export const VersionControl = () => {
     currentCommitId, 
     hasUnsavedChanges,
     branches,
+    activeBranchId,
     pulledCommitId,
     setCurrentModel,
     commitModelChanges,
@@ -402,6 +225,12 @@ export const VersionControl = () => {
   const [isCommitting, setIsCommitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+
+  // Get the current branch
+  const currentBranch = useMemo(() => {
+    return branches.find((b) => b.id === activeBranchId);
+  }, [branches, activeBranchId]);
 
   // When a model file is loaded, update the version control
   useEffect(() => {
@@ -566,8 +395,24 @@ export const VersionControl = () => {
             </section>
           )}
 
+          {/* Current Branch Indicator */}
+          {currentBranch && (
+            <section className="mb-2">
+              <div className="flex items-center gap-2 px-2 py-1.5 bg-secondary/30 rounded-md">
+                <GitBranch className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">On branch</span>
+                <span className="text-xs font-medium">{currentBranch.name}</span>
+                {currentBranch.isMain && (
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                    main
+                  </Badge>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Version History */}
-          <section>
+          <section className="flex-1 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Version History ({commits.length})
@@ -575,6 +420,35 @@ export const VersionControl = () => {
               <div className="flex items-center gap-1">
                 {commits.length > 0 && (
                   <>
+                    {/* View Mode Toggle */}
+                    <div className="flex items-center bg-secondary/50 rounded-md p-0.5">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setViewMode("list")}
+                        className={`h-5 px-2 text-xs rounded-sm ${
+                          viewMode === "list"
+                            ? "bg-background shadow-sm"
+                            : "hover:bg-transparent"
+                        }`}
+                        title="List view"
+                      >
+                        <Archive className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setViewMode("graph")}
+                        className={`h-5 px-2 text-xs rounded-sm ${
+                          viewMode === "graph"
+                            ? "bg-background shadow-sm"
+                            : "hover:bg-transparent"
+                        }`}
+                        title="Graph view"
+                      >
+                        <Network className="w-3 h-3" />
+                      </Button>
+                    </div>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -585,22 +459,24 @@ export const VersionControl = () => {
                       <Grid3x3 className={`w-3 h-3 mr-1 ${isGalleryMode ? 'text-primary' : ''}`} />
                       Gallery
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowStarredOnly(!showStarredOnly)}
-                      className="h-6 px-2 text-xs"
-                    >
-                      <Star className={`w-3 h-3 mr-1 ${showStarredOnly ? 'fill-foreground text-foreground' : 'text-muted-foreground'}`} />
-                      {showStarredOnly ? 'Show All' : 'Starred'}
-                    </Button>
+                    {viewMode === "list" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowStarredOnly(!showStarredOnly)}
+                        className="h-6 px-2 text-xs"
+                      >
+                        <Star className={`w-3 h-3 mr-1 ${showStarredOnly ? 'fill-foreground text-foreground' : 'text-muted-foreground'}`} />
+                        {showStarredOnly ? 'Show All' : 'Starred'}
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
             </div>
             
-            {/* Search Input */}
-            {commits.length > 0 && (
+            {/* Search Input - only in list view */}
+            {commits.length > 0 && viewMode === "list" && (
               <div className="relative mb-3">
                 <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                 <Input
@@ -612,8 +488,17 @@ export const VersionControl = () => {
               </div>
             )}
             
-            {/* Branching Tree */}
-            {filteredCommits.length === 0 && commits.length > 0 ? (
+            {/* View Content */}
+            {viewMode === "graph" ? (
+              <GraphView
+                commits={commits}
+                branches={branches}
+                currentCommitId={currentCommitId}
+                pulledCommitId={pulledCommitId}
+                onSelectCommit={handleRestoreCommit}
+                getVersionLabel={getCommitVersionLabel}
+              />
+            ) : filteredCommits.length === 0 && commits.length > 0 ? (
               <div className="text-center py-4">
                 <p className="text-xs text-muted-foreground">
                   {showStarredOnly && searchQuery
@@ -624,7 +509,7 @@ export const VersionControl = () => {
                 </p>
               </div>
             ) : (
-              <BranchingTree
+              <SimpleList
                 commits={filteredCommits}
                 branches={branches}
                 currentCommitId={currentCommitId}

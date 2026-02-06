@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import { supabase } from '@/lib/supabase';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { toast } from 'sonner';
+import { STRIPE_DISABLED, MOCK_PAYMENT_PLAN } from '@/lib/feature-flags';
 
 export type PaymentPlan = 'student' | 'enterprise' | null;
 
@@ -47,6 +48,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return;
     }
 
+    // When Stripe is disabled, use the mock payment plan
+    if (STRIPE_DISABLED) {
+      console.log('[Feature Flag] Stripe disabled, using mock payment plan:', MOCK_PAYMENT_PLAN);
+      setPaymentPlanState(MOCK_PAYMENT_PLAN);
+      setPaymentPlanLoaded(true);
+      return;
+    }
+
     try {
       const response = await fetch(`${BACKEND_URL}/api/stripe/payment-status`, {
         headers: {
@@ -82,9 +91,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, [loadPaymentPlan]);
 
   // Redirect to checkout if user just signed in and doesn't have a subscription
+  // Skip this redirect when Stripe is disabled
   useEffect(() => {
     if (justSignedInRef.current && paymentPlanLoaded && user) {
       justSignedInRef.current = false; // Reset the flag
+      
+      // Skip checkout redirect when Stripe is disabled
+      if (STRIPE_DISABLED) {
+        console.log('[Feature Flag] Stripe disabled, skipping checkout redirect');
+        return;
+      }
       
       if (!paymentPlan) {
         // User just signed in but has no active subscription

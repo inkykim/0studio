@@ -13,14 +13,15 @@ import { VersionControlProvider } from '@/contexts/VersionControlContext';
 import { TitleBar } from '@/components/TitleBar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, Check, Loader2, Shield, CreditCard } from 'lucide-react';
+import { ArrowLeft, Check, Loader2, Shield, CreditCard, Construction } from 'lucide-react';
 import { toast } from 'sonner';
+import { STRIPE_DISABLED } from '@/lib/feature-flags';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 
-// Initialize Stripe
-const stripePromise = STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
+// Initialize Stripe (only if not disabled)
+const stripePromise = !STRIPE_DISABLED && STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
 
 interface CheckoutFormProps {
   planName: string;
@@ -238,6 +239,38 @@ export default function Checkout() {
             <TitleBar />
             <div className="flex-1 flex items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          </div>
+        </ModelProvider>
+      </VersionControlProvider>
+    );
+  }
+
+  // Show disabled message when Stripe is disabled via feature flag
+  if (STRIPE_DISABLED) {
+    return (
+      <VersionControlProvider>
+        <ModelProvider>
+          <div className="h-screen flex flex-col bg-background">
+            <TitleBar />
+            <div className="flex-1 flex items-center justify-center">
+              <Card className="w-full max-w-md">
+                <CardHeader className="text-center">
+                  <Construction className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                  <CardTitle>Payments Coming Soon</CardTitle>
+                  <CardDescription>
+                    Payment processing is currently disabled for testing. All features are unlocked in this test build.
+                  </CardDescription>
+                </CardHeader>
+                <CardFooter className="flex gap-3">
+                  <Button onClick={() => navigate('/dashboard')} variant="outline" className="flex-1">
+                    View Plans
+                  </Button>
+                  <Button onClick={() => navigate('/')} className="flex-1">
+                    Back to App
+                  </Button>
+                </CardFooter>
+              </Card>
             </div>
           </div>
         </ModelProvider>
