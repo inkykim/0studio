@@ -30,19 +30,24 @@ export default function Dashboard() {
     }
   }, [searchParams, navigate, refreshPaymentStatus]);
 
-  const studentPlanFeatures = [
+  const freePlanFeatures = [
     'Unlimited commits',
     'File tree visualization',
+    'Community support',
+  ];
+
+  const proPlanFeatures = [
+    'Everything in Free',
     'Pull from cloud storage',
     'Share with 5 other team members',
-    'Community support'
+    'Priority support',
   ];
 
   const enterprisePlanFeatures = [
-    'Everything in Student',
+    'Everything in Pro',
     'Share across entire organization',
     'Fine-tuned merge conflict resolution',
-    'Priority support',
+    'Dedicated support',
   ];
 
   const handlePlanSelect = (planName: string, units: number, totalPrice: number) => {
@@ -51,13 +56,12 @@ export default function Dashboard() {
       return;
     }
 
-    // Determine the price ID based on plan
-    const priceId = planName.toLowerCase() === 'student' 
-      ? 'price_1SpIuQBU9neqC79tYoTbDCck' 
+    const plan = planName.toLowerCase();
+    const priceId = plan === 'pro'
+      ? 'price_1SpIuQBU9neqC79tYoTbDCck'
       : 'price_enterprise'; // Update with your actual enterprise price ID
 
-    // Navigate to custom checkout page with plan details
-    navigate(`/checkout?plan=${planName.toLowerCase()}&priceId=${priceId}&price=${totalPrice}`);
+    navigate(`/checkout?plan=${plan}&priceId=${priceId}&price=${totalPrice}`);
   };
 
   return (
@@ -78,7 +82,7 @@ export default function Dashboard() {
               </Button>
               {paymentPlan ? (
                 <p className="text-muted-foreground">
-                  Your current plan is: {paymentPlan === 'student' ? 'Student' : 'Enterprise'}
+                  Your current plan is: {paymentPlan === 'free' ? 'Free' : paymentPlan === 'pro' || paymentPlan === 'student' ? 'Pro' : 'Enterprise'}
                 </p>
               ) : (
                 <p className="text-muted-foreground">
@@ -89,33 +93,56 @@ export default function Dashboard() {
 
             {/* Pricing cards centered */}
             <div className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8 md:flex-row">
-              {/* Student Plan */}
+              {/* Free Plan - Default, current when no paid plan */}
               <InteractivePricingCard
-                planName="Student"
-                planDescription="For individuals and small teams."
-                pricePerUnit={10}
+                planName="Free"
+                planDescription="For getting started and personal use."
+                pricePerUnit={0}
                 unitName="user"
                 minUnits={1}
-                maxUnits={10}
+                maxUnits={1}
                 initialUnits={1}
-                features={studentPlanFeatures}
-                ctaText="Get Started with Student"
+                features={freePlanFeatures}
+                ctaText="Current plan"
                 hideSlider={true}
+                isCurrentPlan={!paymentPlan || paymentPlan === 'free'}
+                highlighted={!paymentPlan || paymentPlan === 'free'}
                 onPlanSelect={handlePlanSelect}
               />
 
-              {/* Enterprise Plan - Highlighted */}
+              {/* Pro Plan */}
+              <InteractivePricingCard
+                planName="Pro"
+                planDescription="For individuals and small teams."
+                pricePerUnit={10}
+                unitName="month"
+                minUnits={1}
+                maxUnits={1}
+                initialUnits={1}
+                features={proPlanFeatures}
+                ctaText="Get Pro"
+                hideSlider={true}
+                isCurrentPlan={paymentPlan === 'pro' || paymentPlan === 'student'}
+                highlighted={paymentPlan === 'pro' || paymentPlan === 'student'}
+                onPlanSelect={handlePlanSelect}
+              />
+
+              {/* Enterprise Plan */}
               <InteractivePricingCard
                 planName="Enterprise"
                 planDescription="For advanced collaboration and unlimited power."
-                pricePerUnit={50}
-                unitName="user"
+                pricePerUnit={100}
+                unitName="seat"
                 minUnits={5}
-                maxUnits={50}
+                maxUnits={100}
                 initialUnits={10}
                 features={enterprisePlanFeatures}
                 ctaText="Subscribe to Enterprise"
-                highlighted={true}
+                contactSalesLabel="Contact sales"
+                contactSalesHref="mailto:founders@0studio.xyz"
+                centerShowsPerUnitRate={true}
+                isCurrentPlan={paymentPlan === 'enterprise'}
+                highlighted={paymentPlan === 'enterprise'}
                 onPlanSelect={handlePlanSelect}
               />
             </div>
