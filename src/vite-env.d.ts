@@ -35,6 +35,7 @@ declare global {
   interface Window {
     electronAPI?: {
       openProjectDialog: () => Promise<string | null>;
+      openProjectByPath: (filePath: string) => Promise<void>;
       getCurrentProject: () => Promise<ProjectInfo | null>;
       closeProject: () => Promise<void>;
       

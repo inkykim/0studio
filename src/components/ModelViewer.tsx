@@ -5,11 +5,129 @@ import * as THREE from "three";
 import {
   FileBox,
   X,
+  FolderOpen,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useModel, SceneStats, GeneratedObject, LoadedModel } from "@/contexts/ModelContext";
 import { useVersionControl } from "@/contexts/VersionControlContext";
+import { useRecentProjects } from "@/contexts/RecentProjectsContext";
+import { useDesktopAPI } from "@/lib/desktop-api";
 import { TooltipProvider } from "@/components/ui/tooltip";
+
+/** Shorten path for display - replace /Users/username with ~ */
+function shortenPath(path: string): string {
+  // Match /Users/username or C:\Users\username
+  const usersMatch = path.match(/^(\/Users\/[^/]+)(\/.*)?$/);
+  if (usersMatch) {
+    return "~" + (usersMatch[2] || "");
+  }
+  const winMatch = path.match(/^([A-Z]:\\Users\\[^\\]+)(\\.*)?$/i);
+  if (winMatch) {
+    return "~" + (winMatch[2]?.replace(/\\/g, "/") || "");
+  }
+  // Fallback: show last 2 path segments
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  if (parts.length > 2) {
+    return "…/" + parts.slice(-2).join("/");
+  }
+  return path;
+}
+
+function WelcomePanel({
+  triggerFileDialog,
+  onDragDropHint,
+}: {
+  triggerFileDialog: () => void;
+  onDragDropHint: string;
+}) {
+  const { recentProjects } = useRecentProjects();
+  const desktopAPI = useDesktopAPI();
+  const isDesktop = desktopAPI.isDesktop;
+
+  const handleOpenRecent = async (path: string) => {
+    if (isDesktop) {
+      await desktopAPI.openProjectByPath(path);
+    }
+  };
+
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center">
+      {/* Centered welcome panel - 0studio preview at top, actions below */}
+      <div className="flex flex-col items-center gap-8 max-w-md w-full mx-4">
+        {/* 0studio preview / branding */}
+        <div className="flex flex-col items-center gap-4">
+          <h1 className="text-3xl font-semibold tracking-tight">0studio</h1>
+        </div>
+
+        {/* Open project & Recent projects - centered below */}
+        <div className="w-full flex flex-col gap-6 bg-background/80 backdrop-blur-xl border border-border/50 rounded-lg shadow-2xl p-6">
+          {/* Primary actions */}
+          <div className="flex flex-col gap-2">
+            <Button
+              onClick={triggerFileDialog}
+              variant="secondary"
+              className="h-14 w-full justify-start gap-4 px-4 hover:bg-muted/80 transition-colors"
+            >
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <FolderOpen className="w-5 h-5 text-primary" />
+              </div>
+              <div className="text-left">
+                <div className="font-medium">Open project</div>
+                <div className="text-xs text-muted-foreground">{onDragDropHint}</div>
+              </div>
+              <ChevronRight className="w-4 h-4 ml-auto text-muted-foreground" />
+            </Button>
+            <Button
+              onClick={triggerFileDialog}
+              variant="ghost"
+              className="h-12 w-full justify-start gap-4 px-4"
+            >
+              <FileBox className="w-5 h-5 text-muted-foreground" />
+              <span>Import .3dm file</span>
+            </Button>
+          </div>
+
+          {/* Recent projects */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground">Recent projects</h2>
+              {recentProjects.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {recentProjects.length} {recentProjects.length === 1 ? "project" : "projects"}
+                </span>
+              )}
+            </div>
+            <div className="max-h-40 overflow-auto space-y-0.5">
+              {recentProjects.length === 0 ? (
+                <p className="text-sm text-muted-foreground/70 py-2">
+                  No recent projects. Open a .3dm file to get started.
+                </p>
+              ) : (
+                recentProjects.map((project) => (
+                  <button
+                    key={project.path}
+                    onClick={() => handleOpenRecent(project.path)}
+                    disabled={!isDesktop}
+                    className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-left hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
+                  >
+                    <span className="font-medium truncate flex-1 min-w-0">{project.name}</span>
+                    <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+                      {shortenPath(project.path)}
+                    </span>
+                    {isDesktop && (
+                      <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function DefaultCube() {
   return (
@@ -621,21 +739,12 @@ export const ModelViewer = () => {
           </div>
         )}
 
-        {/* Empty state */}
+        {/* Empty state - Cursor-style welcome panel */}
         {!loadedModel && !isLoading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center">
-            <div className="text-center p-8">
-              <FileBox className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-xl font-medium mb-2">Import 3D Model</h3>
-              <p className="text-muted-foreground mb-6">
-                Drag & drop a .3dm file here or click to browse
-              </p>
-              <Button onClick={triggerFileDialog} className="gap-2">
-                <FileBox className="w-4 h-4" />
-                Choose File
-              </Button>
-            </div>
-          </div>
+          <WelcomePanel
+            triggerFileDialog={triggerFileDialog}
+            onDragDropHint="Drag & drop a .3dm file anywhere to open"
+          />
         )}
 
         {/* Loading state */}

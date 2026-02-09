@@ -34,6 +34,7 @@ export interface GitCommit {
 contextBridge.exposeInMainWorld('electronAPI', {
   // Project management
   openProjectDialog: () => ipcRenderer.invoke('open-project-dialog'),
+  openProjectByPath: (filePath: string) => ipcRenderer.invoke('open-project-by-path', filePath),
   getCurrentProject: () => ipcRenderer.invoke('get-current-project'),
   closeProject: () => ipcRenderer.invoke('close-project'),
 
@@ -101,6 +102,7 @@ declare global {
   interface Window {
     electronAPI: {
       openProjectDialog: () => Promise<string | null>;
+      openProjectByPath: (filePath: string) => Promise<void>;
       getCurrentProject: () => Promise<ProjectInfo | null>;
       closeProject: () => Promise<void>;
       

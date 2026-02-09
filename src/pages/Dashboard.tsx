@@ -1,11 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from "@/contexts/AuthContext";
 import { InteractivePricingCard } from '@/components/ui/pricing';
 import { TitleBar } from "@/components/TitleBar";
 import { ModelProvider } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -13,6 +13,7 @@ export default function Dashboard() {
   const { user, paymentPlan, refreshPaymentStatus } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Handle success/cancel from Stripe redirect
   useEffect(() => {
@@ -21,7 +22,7 @@ export default function Dashboard() {
     
     if (success) {
       toast.success('Payment successful! Your plan is now active.');
-      refreshPaymentStatus?.();
+      refreshPaymentStatus?.({ retryAfterPayment: true });
       // Clean up URL
       navigate('/dashboard', { replace: true });
     } else if (canceled) {
@@ -85,9 +86,26 @@ export default function Dashboard() {
                   Your current plan is: {paymentPlan === 'free' ? 'Free' : paymentPlan === 'pro' || paymentPlan === 'student' ? 'Pro' : 'Enterprise'}
                 </p>
               ) : (
-                <p className="text-muted-foreground">
-                  Choose a plan to unlock all features. Without a verified plan, you can make commits but cannot pull from cloud
-                </p>
+                <div className="space-y-2">
+                  <p className="text-muted-foreground">
+                    Choose a plan to unlock all features. Without a verified plan, you can make commits but cannot pull from cloud
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      setIsRefreshing(true);
+                      const found = await refreshPaymentStatus?.({ retryAfterPayment: true });
+                      setIsRefreshing(false);
+                      if (!found) toast.info('If you just subscribed, your plan may take a moment to activate.');
+                    }}
+                    disabled={isRefreshing}
+                    className="gap-1.5 text-muted-foreground"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    {isRefreshing ? 'Checking...' : 'Just subscribed? Refresh plan status'}
+                  </Button>
+                </div>
               )}
             </div>
 

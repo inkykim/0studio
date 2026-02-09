@@ -15,7 +15,7 @@ import {
 } from "@/lib/rhino3dm-service";
 import { desktopAPI } from "@/lib/desktop-api";
 import { useVersionControl } from "./VersionControlContext";
-import { checkSubscriptionStatus } from "@/lib/subscription-service";
+import { useRecentProjects } from "./RecentProjectsContext";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
@@ -134,7 +134,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
 
   // Get version control functions
   // Note: VersionControlProvider must wrap ModelProvider for this to work
-  const { markUnsavedChanges, setModelRestoreCallback, createInitialCommit } = useVersionControl();
+  const { markUnsavedChanges, setModelRestoreCallback, createInitialCommit, setCurrentModel } = useVersionControl();
+  const { addRecentProject } = useRecentProjects();
 
   // Set up model restore callback for version control
   useEffect(() => {
@@ -164,16 +165,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Check subscription status
-      const hasActiveSubscription = await checkSubscriptionStatus();
-      
-      if (!hasActiveSubscription) {
-        toast.error('Subscription Required', {
-          description: 'An active subscription is required to import 3D models. Please subscribe to continue.',
-        });
-        return;
-      }
-      
       setIsLoading(true);
       setError(null);
 
@@ -189,7 +180,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         
         // Load the 3dm file
         const result = await load3dmFile(file);
-        setLoadedModel(result);
 
         // Use the actual file path from Electron (not hardcoded!)
         const filePath = project.filePath;
@@ -198,9 +188,18 @@ export function ModelProvider({ children }: { children: ReactNode }) {
 
         console.log('Set current file for watching:', filePath);
 
-        // Create initial commit for version control with exact file buffer
+        // Load branches/commits from 0studio_{filename}/ folder BEFORE createInitialCommit
+        // This ensures existing version history is restored when opening from recent projects
+        await setCurrentModel(filePath);
+
+        setLoadedModel(result);
+
+        // Create initial commit for version control with exact file buffer (only if no commits exist)
         await createInitialCommit(result, arrayBuffer, filePath);
         console.log('Created initial commit for model opened via native dialog');
+
+        // Add to recent projects (Electron provides full path)
+        addRecentProject(filePath, project.fileName);
         
         toast.success('Model imported successfully');
 
@@ -221,7 +220,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     return () => {
       desktopAPI.removeAllListeners('project-opened');
     };
-  }, [createInitialCommit]);
+  }, [createInitialCommit, addRecentProject, setCurrentModel]);
 
   // File change detection and handling
   useEffect(() => {
@@ -485,17 +484,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         description: 'Please sign in to import 3D models.',
       });
       setError("Authentication required");
-      return;
-    }
-
-    // 3. Check subscription status
-    const hasActiveSubscription = await checkSubscriptionStatus();
-    
-    if (!hasActiveSubscription) {
-      toast.error('Subscription Required', {
-        description: 'An active subscription is required to import 3D models. Please subscribe to continue.',
-      });
-      setError("Subscription required");
       return;
     }
 

@@ -1,7 +1,7 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2026-01-27  
-**Version:** 1.4.0  
+**Last Updated:** 2026-02-09  
+**Version:** 1.6.0  
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -204,13 +204,14 @@
 │   │   ├── VersionControl.tsx   # Version control UI with branching tree
 │   │   ├── NavLink.tsx          # Navigation link component
 │   │   ├── Auth.tsx             # Authentication UI (AuthDialog, UserMenu)
-│   │   ├── TitleBar.tsx         # macOS title bar with user menu
+│   │   ├── TitleBar.tsx         # macOS title bar with user menu + settings icon
 │   │   └── ui/                  # Shadcn UI components
 │   │
 │   ├── contexts/        # React contexts (state management)
 │   │   ├── ModelContext.tsx           # 3D model state
 │   │   ├── VersionControlContext.tsx  # Version control state
-│   │   └── AuthContext.tsx            # Authentication state
+│   │   ├── AuthContext.tsx            # Authentication state
+│   │   └── RecentProjectsContext.tsx  # Recent projects list (localStorage)
 │   │
 │   ├── lib/             # Core libraries and services
 │   │   ├── desktop-api.ts        # Electron IPC wrapper
@@ -304,7 +305,7 @@
 - Coordinates with ModelContext via callbacks
 - Handles cloud sync with Supabase and S3
 - **Local Persistence**: Loads/saves `tree.json` from `0studio_{filename}/` folder
-  - Loads on `setCurrentModel()` (primary source, falls back to localStorage)
+  - Loads on `setCurrentModel()` (returns Promise—callers await to ensure branches/commits loaded before createInitialCommit)
   - Auto-saves on any commit/branch change via `useEffect`
   - Validates commit files exist, warns about missing files
   - Saves before project close to ensure persistence
@@ -315,8 +316,7 @@
 - Tracks user session and loading state
 - Manages payment plan state (student/enterprise/none) from backend API
 - Auto-refreshes tokens and persists sessions
-- **Auto-redirect to checkout**: When user signs up without a subscription, automatically redirects to `/checkout` with default Student plan
-- Uses `justSignedInRef` to track fresh sign-ups and OAuth returns
+- **No auto-redirect**: Subscription redirect disabled; import available on free plan
 
 **`src/lib/desktop-api.ts`**
 - Singleton service wrapping Electron IPC
@@ -365,7 +365,12 @@
 - **Adaptive Grid**: Grid cell size scales proportionally to model dimensions using "nice numbers" (1, 2, 5, 10, etc.)
 - Scene stats overlay (curves, surfaces, polysurfaces count)
 - Drag-and-drop file import support
-- Empty state with file picker button (centered, clean UI)
+- **Initial Page / Welcome Panel** (when no model loaded): Cursor-style centered layout
+  - 0studio branding at top
+  - Glass-effect card with "Open project" and "Import .3dm file" buttons
+  - Recent projects list (stored in localStorage, up to 10 items)
+  - 3D canvas visible in background (grid + default scene)
+  - Recent projects clickable in Electron to reopen by path
 - Loading and error states
 - **Gallery Mode**: Adaptive grid layouts for comparing multiple commits
   - 1 model: Full view
@@ -397,6 +402,11 @@
   - Dropdown contains: Dashboard option (with icon) and Sign Out option (with icon)
   - Uses Shadcn DropdownMenu component
   - If user not logged in, shows AuthDialog instead
+
+**`src/components/TitleBar.tsx`**
+- macOS-style title bar with hidden inset (traffic lights at x:10, y:6)
+- Shows 0studio branding and current file name
+- Right side: User menu (username) + Settings icon (links to dashboard)
 
 **`src/pages/Dashboard.tsx`**
 - Dashboard UI for selecting payment plans
@@ -476,7 +486,7 @@
 - `treeLoadPromise`: Promise that resolves when tree.json loading completes (internal, for race condition prevention)
 
 **Key Methods**:
-- `setCurrentModel(path)`: Set current model, loads tree.json and creates treeLoadPromise
+- `setCurrentModel(path)`: Set current model, loads tree.json from `0studio_{filename}/` and returns Promise (callers await to ensure branches/commits loaded before createInitialCommit)
 - `commitModelChanges(message, modelData, customBranchName?)`: Create regular commit (auto-branches when committing from non-head)
 - `restoreToCommit(commitId)`: Restore model to specific commit (UI only, doesn't update disk)
 - `pullFromCommit(commitId)`: Pull commit to local file (updates disk, sets pulledCommitId for branch tracking)
@@ -533,12 +543,28 @@
 - Payment status checked before cloud pull operations
 - Dashboard uses AuthContext to check current plan
 
+### RecentProjectsContext
+
+**Purpose**: Tracks recently opened .3dm projects for quick access on the welcome screen
+
+**Storage**: localStorage (`0studio_recent_projects`), max 10 items
+
+**Key State**:
+- `recentProjects`: Array of `{ name, path, openedAt }`
+
+**Key Methods**:
+- `addRecentProject(path, name?)`: Add project to list (called when project opened via Electron)
+- `removeRecentProject(path)`: Remove from list
+- `clearRecentProjects()`: Clear all
+
+**Integration**: ModelContext calls `addRecentProject()` on project-opened event. Welcome panel displays list; clicking opens via `desktopAPI.openProjectByPath()` (Electron only). When opening (native dialog or recent projects), ModelContext awaits `setCurrentModel(filePath)` before `createInitialCommit`—ensures branches/commits load from `0studio_{filename}/` folder.
+
 ### DesktopAPI Service
 
 **Purpose**: Type-safe wrapper for Electron IPC
 
 **Key Methods**:
-- Project: `openProjectDialog()`, `getCurrentProject()`, `closeProject()`
+- Project: `openProjectDialog()`, `openProjectByPath(filePath)`, `getCurrentProject()`, `closeProject()`
 - File Watching: `startFileWatching()`, `stopFileWatching()`, `setCurrentFile()`
 - File Reading: `readFileBuffer(filePath)`, `writeFileBuffer(filePath, buffer)`
 - Commit Storage: `saveCommitFile()`, `readCommitFile()`, `listCommitFiles()`, `commitFileExists()`
@@ -555,21 +581,23 @@
 ### File Loading Flow
 
 ```
-1. User opens .3dm file
+1. User opens .3dm file (native dialog or recent projects)
    ↓
-2. Electron main process: openProjectDialog()
+2. Electron main process: openProjectDialog() or openProjectByPath()
    ↓
 3. IPC: project-opened event → Renderer
    ↓
-4. ModelContext.importFile() called
+4. ModelContext: handleProjectOpened
    ↓
-5. rhino3dm-service.load3dmFile() parses file
+5. await setCurrentModel(filePath) — loads tree.json from 0studio_{filename}/, restores branches & commits
    ↓
-6. ModelContext.setLoadedModel() updates state
+6. rhino3dm-service.load3dmFile() parses file
    ↓
-7. ModelViewer renders Three.js scene
+7. ModelContext.setLoadedModel() updates state
    ↓
-8. VersionControlContext.createInitialCommit() stores initial state
+8. VersionControlContext.createInitialCommit() — skips if commits exist from tree.json
+   ↓
+9. ModelViewer renders Three.js scene
 ```
 
 ### File Change Detection Flow
@@ -994,9 +1022,9 @@ npm run electron:dist   # Alternative: explicit dist build
   - **Local Development**: `http://localhost:3000`
   - **Stripe Webhook Endpoint**: `POST /api/stripe/webhook`
     - Local: Use Stripe CLI: `stripe listen --forward-to localhost:3000/api/stripe/webhook`
-- **Embedded Checkout Flow** (NEW - stays in Electron app):
-  1. User signs up → auto-redirected to `/checkout` with Student plan
-  2. OR User clicks plan in Dashboard → navigates to `/checkout?plan=...&priceId=...&price=...`
+- **Embedded Checkout Flow** (stays in Electron app):
+  1. User clicks plan in Dashboard → navigates to `/checkout?plan=...&priceId=...&price=...`
+  2. (No auto-redirect on sign-up; import available on free plan)
   3. Checkout page calls `POST /api/stripe/create-subscription-intent`
   4. Backend creates Stripe customer and subscription with PaymentIntent
   5. Checkout page renders Stripe PaymentElement with clientSecret
@@ -1072,21 +1100,21 @@ npm run electron:dist   # Alternative: explicit dist build
 
 ### Opening a Project
 
-1. User clicks "Open .3dm Project" or uses Cmd+O
-2. Electron shows file dialog
-3. User selects .3dm file
+1. User clicks "Open project" or selects from recent projects (or uses Cmd+O)
+2. Electron shows file dialog (or opens via `openProjectByPath` for recent projects)
+3. User selects .3dm file (or path from recent list)
 4. Electron main process:
    - Sets currentProjectFile
    - Starts file watching
    - Sends 'project-opened' event
-5. Renderer receives event:
-   - ModelContext.importFile() loads file
-   - VersionControlContext.setCurrentModel() sets path
-   - VersionControlContext loads `tree.json` from `0studio_{filename}/` folder:
+5. Renderer receives event (ModelContext.handleProjectOpened):
+   - **await setCurrentModel(filePath)** — loads `tree.json` from `0studio_{filename}/` folder first:
      - If exists: Parses and loads branches and commits, validates commit files
      - If missing: Falls back to localStorage (backwards compatibility)
-   - VersionControlContext.createInitialCommit() creates first commit (if no commits exist)
+   - Loads .3dm file via rhino3dm-service
+   - **createInitialCommit()** — creates first commit only if no commits exist (skips if loaded from tree.json)
    - Tree.json is auto-saved after initial commit
+   - Adds to recent projects list
 
 ### Committing Changes
 
@@ -1202,49 +1230,40 @@ npm run electron:dist   # Alternative: explicit dist build
 ### Stripe Payment Flow (Embedded Checkout)
 
 ```
-1. User signs up (email or Google OAuth)
+1. User navigates to Dashboard and clicks a plan (or signs up and goes to Dashboard)
    ↓
-2. AuthContext detects new user without subscription
+2. Dashboard navigates to /checkout?plan=...&priceId=...&price=...
    ↓
-3. Auto-redirect to /checkout with default Student plan
+3. Checkout page calls POST /api/stripe/create-subscription-intent
    ↓
-4. Checkout page calls POST /api/stripe/create-subscription-intent
+4. Backend creates Stripe customer (if new) and subscription with PaymentIntent
    ↓
-5. Backend creates Stripe customer (if new) and subscription with PaymentIntent
+5. Backend stores pending subscription in Supabase
    ↓
-6. Backend stores pending subscription in Supabase
+6. Checkout page receives clientSecret and renders Stripe PaymentElement
    ↓
-7. Checkout page receives clientSecret and renders Stripe PaymentElement
+7. User enters payment details in embedded form (stays in Electron app)
    ↓
-8. User enters payment details in embedded form (stays in Electron app)
+8. User clicks "Subscribe" → stripe.confirmPayment() called
    ↓
-9. User clicks "Subscribe" → stripe.confirmPayment() called
+9. Stripe processes payment
    ↓
-10. Stripe processes payment
+10. Stripe sends webhook: invoice.payment_succeeded
    ↓
-11. Stripe sends webhook: invoice.payment_succeeded
+11. Backend webhook handler updates subscription status to 'active' in Supabase
    ↓
-12. Backend webhook handler updates subscription status to 'active' in Supabase
+12. Checkout page detects success and navigates to Dashboard
    ↓
-13. Checkout page detects success and navigates to Dashboard
+13. Dashboard calls refreshPaymentStatus() in AuthContext
    ↓
-14. Dashboard calls refreshPaymentStatus() in AuthContext
+14. AuthContext calls GET /api/stripe/payment-status
    ↓
-15. AuthContext calls GET /api/stripe/payment-status
+15. AuthContext updates paymentPlan state
    ↓
-16. AuthContext updates paymentPlan state
-   ↓
-17. User now has access to all features
+16. User now has Pro/Enterprise plan (import works on free plan; paid features when enabled)
 ```
 
-**Alternative Flow (Dashboard Plan Selection)**:
-```
-1. User clicks plan in Dashboard
-   ↓
-2. Dashboard navigates to /checkout?plan={plan}&priceId={priceId}&price={price}
-   ↓
-3. (Same as steps 4-17 above)
-```
+**Note**: No auto-redirect on sign-up; users can use import on free plan and optionally subscribe via Dashboard.
 
 ---
 
@@ -1295,8 +1314,8 @@ This section documents features that are partially implemented or have known gap
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Supabase Auth | ✅ Implemented | Email + Google OAuth |
-| Sign Up Flow | ✅ Implemented | Auto-redirect to checkout |
-| Sign In Flow | ✅ Implemented | With subscription check |
+| Sign Up Flow | ✅ Implemented | No auto-redirect; import available on free plan |
+| Sign In Flow | ✅ Implemented | Direct access to app |
 | Password Reset | ✅ Implemented | Email-based |
 | Stripe Subscriptions | ✅ Implemented | Student and Enterprise plans |
 | Embedded Checkout | ✅ Implemented | Stripe Elements in-app |
@@ -1339,7 +1358,23 @@ This section documents features that are partially implemented or have known gap
 
 ## Recent Updates & Features
 
-### Custom Stripe Checkout (v1.4.0 - Latest)
+### Free Plan Import & Subscription Changes (v1.6.0 - Latest)
+
+**Import Available on Free Plan**:
+- Removed subscription requirement from model import
+- Users can import .3dm files with authentication only (no paid plan required)
+- Subscription check removed from `ModelContext.importFile()` and file dialog handler
+
+**Non-Import Features Disabled**:
+- Auto-redirect to checkout when user signs in without subscription: **disabled**
+- Pull from cloud storage, share features: not implemented (disabled for now)
+- Users can use the app on free plan and optionally subscribe via Dashboard
+
+**AuthContext Changes**:
+- Removed `justSignedInRef` and subscription redirect logic
+- Sign up/sign in no longer redirects to checkout
+
+### Custom Stripe Checkout (v1.4.0)
 
 **Embedded Checkout Page**:
 - New `/checkout` route with Stripe Elements integration
@@ -1350,11 +1385,9 @@ This section documents features that are partially implemented or have known gap
 - "Compare all plans" button to return to Dashboard
 - "Back to app" button to skip checkout
 
-**Auto-Redirect to Checkout**:
-- New users without subscription are automatically redirected to `/checkout` after sign up
-- Default Student plan ($10/mo) pre-selected
-- Works for both email sign up and Google OAuth
-- Uses `justSignedInRef` to track fresh sign-ins
+**Checkout Flow** (auto-redirect disabled in v1.6.0 - users go to Dashboard and can subscribe optionally):
+- Users navigate to Dashboard and click a plan to reach checkout
+- Default Student plan ($10/mo) available when selecting Pro
 
 **New Backend Endpoint**:
 - `POST /api/stripe/create-subscription-intent` creates subscription with PaymentIntent
@@ -1392,10 +1425,17 @@ This section documents features that are partially implemented or have known gap
 - **Adaptive Grid**: Grid cell size scales proportionally to model dimensions
 - **Smart Grid Sizing**: Uses "nice numbers" (1, 2, 5, 10, etc.) for grid cell sizes
 
-**Improved Home UI**:
-- **Conditional Panel Layout**: Resizable panels only shown when model is loaded
-- **Clean Empty State**: Centered import UI with drag & drop area
-- **Streamlined Flow**: Single full-width viewport for file selection
+**Initial Page / Welcome Screen Design** (Cursor-style):
+- **Centered Layout**: 0studio branding at top, actions centered below
+- **Welcome Panel**: Glass-effect card (backdrop-blur) with:
+  - "Open project" primary button (folder icon, opens native dialog in Electron)
+  - "Import .3dm file" secondary button
+  - Recent projects list (name + shortened path, clickable in Electron)
+- **Branch Loading on Open**: When opening (native dialog or recent projects), `setCurrentModel(filePath)` is awaited first—loads branches/commits from `0studio_{filename}/` before createInitialCommit, so version history is restored
+- **3D Background**: Canvas and grid always visible behind the panel
+- **Recent Projects**: Stored in localStorage (RecentProjectsContext), max 10 items
+- **Settings**: Moved to TitleBar (gear icon to right of username, links to dashboard)
+- **Conditional Panel Layout**: Resizable version control panel only shown when model is loaded
 
 **Cleaner Branching UI**:
 - **Neutral Color Scheme**: Replaced amber/yellow highlighting with gray tones
@@ -1452,7 +1492,7 @@ This section documents features that are partially implemented or have known gap
 - **Dashboard**: User-friendly plan selection interface
 
 ### Bug Fixes
-- **Tree.json Persistence**: Fixed race condition where `createInitialCommit` could run before tree.json finished loading, causing duplicate commits when reopening projects
+- **Tree.json Persistence**: Fixed race condition where `createInitialCommit` could run before tree.json finished loading—ModelContext now awaits `setCurrentModel(filePath)` before `createInitialCommit`, ensuring branches/commits from `0studio_{filename}/` are loaded when opening (native dialog or recent projects)
 - **Gallery Mode Reset**: Fixed bug where gallery mode background persisted after closing project
 - **Grid Layout**: Fixed 3 and 4 model layouts to display correctly
 - **Selection Limit**: Proper enforcement of 4-commit maximum

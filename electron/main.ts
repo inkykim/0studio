@@ -73,7 +73,7 @@ class RhinoStudio {
         preload: join(__dirname, 'preload.cjs'),
       },
       titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 20, y: 20 },
+      trafficLightPosition: { x: 10, y: 6 },
       minWidth: 800,
       minHeight: 600,
       show: false,
@@ -187,6 +187,7 @@ class RhinoStudio {
   private setupIPC() {
     // Model management
     ipcMain.handle('open-project-dialog', () => this.openProjectDialog());
+    ipcMain.handle('open-project-by-path', (_, filePath: string) => this.openProject(filePath));
     ipcMain.handle('get-current-project', () => this.getCurrentProject());
     ipcMain.handle('close-project', () => this.closeProject());
 
@@ -239,10 +240,10 @@ class RhinoStudio {
     return null;
   }
 
-  private async openProject(filePath: string): Promise<void> {
+  private async openProject(filePath: string): Promise<boolean> {
     if (!existsSync(filePath)) {
       dialog.showErrorBox('Error', 'File not found: ' + filePath);
-      return;
+      return false;
     }
 
     this.currentProjectFile = filePath;
@@ -260,6 +261,7 @@ class RhinoStudio {
       filePath,
       fileName: basename(filePath)
     });
+    return true;
   }
 
   private async closeProject(): Promise<void> {

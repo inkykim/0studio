@@ -1,5 +1,5 @@
 // Authentication context using Supabase
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { toast } from 'sonner';
@@ -18,7 +18,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
   setPaymentPlan: (plan: PaymentPlan) => Promise<void>;
-  refreshPaymentStatus: () => Promise<void>;
+  refreshPaymentStatus: (options?: { retryAfterPayment?: boolean }) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,18 +33,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [paymentPlan, setPaymentPlanState] = useState<PaymentPlan>(null);
   const [paymentPlanLoaded, setPaymentPlanLoaded] = useState(false);
-  
-  // Track if user just signed in (to redirect to dashboard if no subscription)
-  const justSignedInRef = useRef(false);
 
   const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
   // Load payment plan from backend API (Supabase)
-  const loadPaymentPlan = useCallback(async () => {
+  // Returns true if user has active plan, false otherwise (for retry logic)
+  // When keepOptimisticOnFailure is true, don't clear plan when API returns no plan (webhook may still be processing)
+  const loadPaymentPlan = useCallback(async (keepOptimisticOnFailure = false): Promise<boolean> => {
     if (!user || !session?.access_token) {
       setPaymentPlanState(null);
       setPaymentPlanLoaded(false);
-      return;
+      return false;
     }
 
     try {
@@ -58,19 +57,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const data = await response.json();
         if (data.hasActivePlan && data.plan) {
           setPaymentPlanState(data.plan as PaymentPlan);
+          return true;
         } else {
-          setPaymentPlanState(null);
+          if (!keepOptimisticOnFailure) setPaymentPlanState(null);
+          return false;
         }
       } else {
-        // If API fails, fall back to localStorage for backward compatibility
-        const stored = localStorage.getItem(`paymentPlan_${user.id}`);
-        setPaymentPlanState((stored as PaymentPlan) || null);
+        if (!keepOptimisticOnFailure) {
+          const stored = localStorage.getItem(`paymentPlan_${user.id}`);
+          setPaymentPlanState((stored as PaymentPlan) || null);
+        }
+        return false;
       }
     } catch (error) {
       console.error('Error loading payment plan:', error);
-      // Fall back to localStorage
-      const stored = localStorage.getItem(`paymentPlan_${user.id}`);
-      setPaymentPlanState((stored as PaymentPlan) || null);
+      if (!keepOptimisticOnFailure) {
+        const stored = localStorage.getItem(`paymentPlan_${user.id}`);
+        setPaymentPlanState((stored as PaymentPlan) || null);
+      }
+      return false;
     } finally {
       setPaymentPlanLoaded(true);
     }
@@ -81,29 +86,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loadPaymentPlan();
   }, [loadPaymentPlan]);
 
-  // Redirect to checkout if user just signed in and doesn't have a subscription
-  useEffect(() => {
-    if (justSignedInRef.current && paymentPlanLoaded && user) {
-      justSignedInRef.current = false; // Reset the flag
-      
-      if (!paymentPlan) {
-        // User just signed in but has no active subscription
-        // Redirect directly to checkout page with default Student plan
-        console.log('User signed in without subscription, redirecting to checkout...');
-        toast.info('Complete your subscription to get started', {
-          description: 'Choose a plan to unlock all features.',
-        });
-        
-        // Use window.location for navigation since we're outside React Router
-        // Check if not already on checkout or dashboard to avoid redirect loop
-        const currentPath = window.location.hash || window.location.pathname;
-        if (!currentPath.includes('/checkout') && !currentPath.includes('/dashboard')) {
-          // Default to Student plan at $10/mo - user can go to dashboard to see other options
-          window.location.href = '#/checkout?plan=student&priceId=price_1SpIuQBU9neqC79tYoTbDCck&price=10';
-        }
-      }
-    }
-  }, [paymentPlanLoaded, paymentPlan, user]);
+  // Subscription redirect disabled: Import is available on free plan; non-import features disabled for now
+  // Previously: redirected to checkout when user signed in without subscription
 
   useEffect(() => {
     // Get initial session
@@ -130,8 +114,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         // If URL contains auth tokens/params, this is likely a fresh OAuth sign-in
         if (urlHash.includes('access_token') || urlParams.has('code')) {
-          console.log('OAuth sign-in detected, marking for subscription check');
-          justSignedInRef.current = true;
+          console.log('OAuth sign-in detected');
         }
       }
     });
@@ -159,8 +142,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         toast.success('Account created! Please check your email to verify your account.');
       } else if (data.session) {
         // User is automatically signed in (if email confirmation is disabled)
-        // Mark that user just signed in (for subscription redirect check)
-        justSignedInRef.current = true;
         toast.success('Account created successfully!');
       }
 
@@ -183,9 +164,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return { error };
       }
 
-      // Mark that user just signed in (for subscription redirect check)
-      justSignedInRef.current = true;
-      
       toast.success('Signed in successfully');
       return { error: null };
     } catch (error) {
@@ -262,8 +240,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const refreshPaymentStatus = useCallback(async () => {
-    await loadPaymentPlan();
+  const refreshPaymentStatus = useCallback(async (options?: { retryAfterPayment?: boolean }): Promise<boolean> => {
+    if (options?.retryAfterPayment) {
+      // After checkout, the Stripe webhook may not have processed yet.
+      // Retry up to 4 times with 2s delays. Don't clear optimistic plan on failure.
+      const maxAttempts = 4;
+      const delayMs = 2000;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const hasPlan = await loadPaymentPlan(true);
+        if (hasPlan) return true;
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+      return false;
+    } else {
+      return await loadPaymentPlan(false);
+    }
   }, [loadPaymentPlan]);
 
   const hasVerifiedPlan = paymentPlan !== null;

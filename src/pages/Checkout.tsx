@@ -141,7 +141,7 @@ function CheckoutForm({ planName, planPrice, onSuccess, onCancel }: CheckoutForm
 }
 
 export default function Checkout() {
-  const { user, session, loading: authLoading, refreshPaymentStatus } = useAuth();
+  const { user, session, loading: authLoading, refreshPaymentStatus, setPaymentPlan } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
@@ -206,7 +206,9 @@ export default function Checkout() {
   }, [user, session, priceId, planName, navigate, authLoading]);
 
   const handleSuccess = async () => {
-    await refreshPaymentStatus?.();
+    // Optimistically set plan so UI updates immediately (webhook may take a few seconds)
+    setPaymentPlan?.(planName.toLowerCase() as 'student' | 'enterprise');
+    await refreshPaymentStatus?.({ retryAfterPayment: true });
     navigate('/dashboard?success=true');
   };
 

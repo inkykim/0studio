@@ -1,5 +1,7 @@
 import { useModel } from "@/contexts/ModelContext";
 import { UserMenu } from "@/components/Auth";
+import { Settings } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export const TitleBar = () => {
   const { currentFile, fileName } = useModel();
@@ -8,7 +10,7 @@ export const TitleBar = () => {
     <div className="h-11 bg-panel-header border-b border-panel-border flex items-center px-4 select-none" style={{ WebkitAppRegion: "drag" } as React.CSSProperties}>
 
       {/* Left spacer for native traffic lights */}
-      <div className="w-20" />
+      <div className="w-16" />
 
       {/* title and project info */}
       <div className="flex-1 flex items-center justify-center">
@@ -23,9 +25,16 @@ export const TitleBar = () => {
         )}
       </div>
 
-      {/* Right side - User menu */}
-      <div className="w-20 flex items-center justify-end" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+      {/* Right side - User menu + Settings icon */}
+      <div className="min-w-[5rem] flex items-center justify-end gap-1" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
         <UserMenu />
+        <Link
+          to="/dashboard"
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          title="Settings"
+        >
+          <Settings className="w-4 h-4" />
+        </Link>
       </div>
     </div>
   );

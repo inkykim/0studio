@@ -50,6 +50,11 @@ class DesktopAPIService {
     return window.electronAPI.openProjectDialog();
   }
 
+  async openProjectByPath(filePath: string): Promise<void> {
+    if (!this.isElectron || !window.electronAPI) return;
+    return window.electronAPI.openProjectByPath(filePath);
+  }
+
   async getCurrentProject(): Promise<ProjectInfo | null> {
     if (!this.isElectron || !window.electronAPI) return null;
     return window.electronAPI.getCurrentProject();

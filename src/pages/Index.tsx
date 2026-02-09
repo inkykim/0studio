@@ -4,7 +4,6 @@ import { ModelViewer } from "@/components/ModelViewer";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { ModelProvider, useModel } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
-
 const MainContent = () => {
   const { currentFile } = useModel();
   const hasModel = !!currentFile;
@@ -39,10 +38,7 @@ const Index = () => {
     <VersionControlProvider>
       <ModelProvider>
         <div className="h-screen flex flex-col bg-background overflow-hidden">
-          {/* macOS Title Bar */}
           <TitleBar />
-
-          {/* Main Content */}
           <MainContent />
         </div>
       </ModelProvider>

@@ -40,7 +40,7 @@ interface VersionControlContextType {
   pulledCommitId: string | null; // The commit that was last pulled/downloaded (for highlighting)
   
   // Actions
-  setCurrentModel: (path: string) => void;
+  setCurrentModel: (path: string) => Promise<void>;
   commitModelChanges: (message: string, currentModelData?: LoadedModel, customBranchName?: string) => Promise<void>;
   createInitialCommit: (modelData: LoadedModel, fileBuffer?: ArrayBuffer, filePath?: string) => void | Promise<void>;
   restoreToCommit: (commitId: string) => Promise<boolean>;
@@ -298,7 +298,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     }
   }, []);
 
-  const setCurrentModel = useCallback((path: string) => {
+  const setCurrentModel = useCallback((path: string): Promise<void> => {
     setCurrentModelState(path);
     
     // Extract filename from path
@@ -310,10 +310,10 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setHasUnsavedChanges(false);
     setPulledCommitId(null);
 
-    // Load from tree.json first (primary source), then fall back to localStorage
+    // Load from tree.json first (primary source in 0studio_{filename}/), then fall back to localStorage
     setIsLoadingTree(true);
     
-    // Create a promise that we can await in createInitialCommit
+    // Create a promise that loads branches/commits from 0studio_{filename}/tree.json
     const loadPromise = (async () => {
       const treeData = await loadTreeFile(path);
       
@@ -364,6 +364,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     })();
     
     setTreeLoadPromise(loadPromise);
+    return loadPromise;
   }, [loadCommitsFromStorage, loadTreeFile]);
 
   const createInitialCommit = useCallback(async (modelData: LoadedModel, fileBuffer?: ArrayBuffer, filePath?: string) => {
