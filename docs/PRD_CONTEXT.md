@@ -1,7 +1,7 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2026-02-09  
-**Version:** 1.6.0  
+**Last Updated:** 2026-02-11  
+**Version:** 1.8.0  
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -37,6 +37,8 @@
 - **3D Model Viewer**: Interactive Three.js-based viewer for .3dm files
 - **Payment Plans**: Student and Enterprise plans (Stripe integration ready)
 - **macOS Native**: Built specifically for macOS with proper file associations
+- **Settings Panel**: User account settings and project settings with team collaboration
+- **Project Collaboration**: Invite members, manage roles (owner/editor/viewer), permissions
 
 ### Planned Features (Not Yet Implemented)
 
@@ -217,13 +219,15 @@
 │   │   ├── desktop-api.ts        # Electron IPC wrapper
 │   │   ├── rhino3dm-service.ts   # Rhino file loading/exporting
 │   │   ├── supabase-api.ts      # Supabase database operations
+│   │   ├── project-api.ts       # Project & member management (backend API)
 │   │   ├── aws-api.ts           # AWS S3 operations
 │   │   ├── commit-storage.ts    # IndexedDB storage for commits
 │   │   └── utils.ts             # Utility functions
 │   │
 │   ├── pages/           # Page components
 │   │   ├── Index.tsx    # Main application page
-│   │   ├── Dashboard.tsx # Payment plan selection
+│   │   ├── Dashboard.tsx # Payment plan selection (Plans & Billing)
+│   │   ├── Settings.tsx # Settings page (Account + Project tabs)
 │   │   ├── Checkout.tsx  # Custom Stripe checkout page
 │   │   └── NotFound.tsx # 404 page
 │   │
@@ -344,6 +348,12 @@
 - Singleton instance exported as `supabaseAPI`
 - ⚠️ **Note**: Complete and functional, but NOT currently called from VersionControlContext
 
+**`src/lib/project-api.ts`**
+- Project and member management API client (calls backend `/api/projects/*`)
+- Methods: `registerProject()`, `getUserProjects()`, `getProjectByFilePath()`, `getProjectMembers()`, `inviteMember()`, `updateMemberRole()`, `removeMember()`
+- Singleton exported as `projectAPI`
+- Uses Supabase session token for auth headers
+
 **`src/lib/aws-api.ts`**
 - AWS S3 API client classes (via backend API)
 - **AWSS3API class** (`awsS3API`): Methods for presigned URLs, upload/download, version listing
@@ -400,17 +410,23 @@
 - `ResetPasswordDialog`: Password reset flow
 - `UserMenu`: Dropdown menu triggered by clicking user email
   - Shows user email as clickable trigger button
-  - Dropdown contains: Dashboard option (with icon) and Sign Out option (with icon)
+  - Dropdown contains: Settings, Plans & Billing (Dashboard), Sign Out
   - Uses Shadcn DropdownMenu component
   - If user not logged in, shows AuthDialog instead
 
 **`src/components/TitleBar.tsx`**
 - macOS-style title bar with hidden inset (traffic lights at x:10, y:6)
 - Shows 0studio branding and current file name
-- Right side: User menu (username) + Settings icon (links to dashboard)
+- Right side: User menu (username) + Settings icon (links to /settings)
+
+**`src/pages/Settings.tsx`**
+- Settings page with two tabs: Account and Project
+- **Account tab**: Profile (email, member since), Plan & Billing (current plan, upgrade/change plan, refresh status), Preferences (theme, auto-save), Sign out
+- **Project tab**: Visible when a .3dm file is open. Enables "Enable collaboration" to register project in cloud. Team members list with role badges (owner/editor/viewer), invite form (email + role), role change and remove member (owners only). Permissions legend explains role capabilities.
+- Uses `projectAPI` from `src/lib/project-api.ts` for backend calls
 
 **`src/pages/Dashboard.tsx`**
-- Dashboard UI for selecting payment plans
+- Plans & Billing UI for selecting payment plans
 - Displays Student ($10/mo) and Enterprise plan options with pricing
 - Shows current plan status and feature limitations
 - Navigates to custom `/checkout` page when user selects a plan
@@ -768,11 +784,12 @@ S3 Bucket:
                └── texture.png
 ```
 
-**Database Schema** (Supabase - `subscriptions` table IS used):
-- `projects`: One row per file location - ⚠️ Table exists but not used by frontend
+**Database Schema** (Supabase):
+- `subscriptions`: User payment plan subscriptions (ACTIVE - managed by Stripe webhooks)
+- `projects`: One row per registered project - ✅ Used by Settings/project-api for collaboration
+- `project_members`: Project team membership (id, project_id, user_id, email, role, invited_by, status, created_at, updated_at). Roles: owner, editor, viewer. Status: pending, active, removed. See `PROJECT_MEMBERS_MIGRATION.sql`
 - `commits`: One row per file version - ⚠️ Table exists but not used by frontend
 - `branches`: Pointers to specific commits - ⚠️ Table exists but not used by frontend
-- `subscriptions`: User payment plan subscriptions (ACTIVE - managed by Stripe webhooks)
   - `id` (uuid, primary key), `user_id` (uuid, references auth.users), `plan` (text: 'student' | 'enterprise')
   - `status` (text: 'active' | 'canceled' | 'past_due'), `stripe_customer_id` (text), `stripe_subscription_id` (text)
   - `created_at` (timestamptz), `updated_at` (timestamptz)
@@ -782,6 +799,7 @@ S3 Bucket:
 - ✅ AWS S3 presigned upload/download URLs - Backend endpoints implemented (`/api/aws/*`)
 - ✅ Stripe payment integration - Implemented
 - ✅ Payment status API - Implemented
+- ✅ Project & member endpoints - Implemented (`/api/projects/*`)
 - ❌ `/files/*` endpoints - NOT implemented (frontend FilesAPI expects these)
 - ❌ Frontend cloud sync integration - NOT implemented (awsS3API never called)
 
@@ -850,6 +868,15 @@ S3 Bucket:
   - Handles: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`
 - `GET /api/stripe/payment-status` - Get user's payment/subscription status (requires auth)
   - Returns: `{ hasActivePlan: boolean, plan: 'student' | 'enterprise' | null, status: string }`
+
+**Project & Member Operations** (all require auth):
+- `POST /api/projects` - Register project for collaboration. Body: `{ name, file_path }`
+- `GET /api/projects/user-projects` - List projects user owns or is a member of
+- `GET /api/projects/by-path?file_path=...` - Get project by file path
+- `GET /api/projects/:projectId/members` - List project members
+- `POST /api/projects/:projectId/members` - Invite member. Body: `{ email, role }` (role: owner | editor | viewer)
+- `PUT /api/projects/:projectId/members/:memberId/role` - Update member role. Body: `{ role }`
+- `DELETE /api/projects/:projectId/members/:memberId` - Remove member (owners only)
 
 **Health Check**:
 - `GET /health` - Health check (no auth required)
@@ -927,6 +954,29 @@ type SceneCommand =
   | { action: 'delete', target: string }
   | { action: 'clear' };
 ```
+
+**ProjectMember** (supabase.ts):
+```typescript
+type ProjectMemberRole = 'owner' | 'editor' | 'viewer';
+type ProjectMemberStatus = 'pending' | 'active' | 'removed';
+
+interface ProjectMember {
+  id: string;
+  project_id: string;
+  user_id: string | null;
+  email: string;
+  role: ProjectMemberRole;
+  invited_by: string | null;
+  status: ProjectMemberStatus;
+  created_at: string;
+  updated_at: string;
+}
+```
+
+**Permission levels** (project settings):
+- **Owner**: Full access - manage members, change roles, remove members
+- **Editor**: Can invite members, commit, create branches, pull versions
+- **Viewer**: Read-only - view project, browse commits/branches
 
 ---
 
@@ -1339,7 +1389,7 @@ This section documents features that are partially implemented or have known gap
 | Supabase Database | ⚠️ Partial | `subscriptions` table active; projects/commits tables unused |
 | Cloud Sync (Push) | ❌ Not Implemented | Backend ready, frontend never calls it |
 | Cloud Sync (Pull) | ❌ Not Implemented | Backend ready, frontend never calls it |
-| Cloud Collaboration | ❌ Not Implemented | Multi-user features planned |
+| Project Collaboration | ✅ Implemented | Settings → Project tab: invite members, roles (owner/editor/viewer) |
 
 ### Git Integration
 
@@ -1359,13 +1409,32 @@ This section documents features that are partially implemented or have known gap
 | Dashboard | ✅ Implemented | Plan selection UI |
 | Checkout Page | ✅ Implemented | Stripe Elements embedded form |
 | Auth Dialog | ✅ Implemented | Login/Signup tabs |
-| User Menu | ✅ Implemented | Dropdown with Dashboard/Sign Out |
+| User Menu | ✅ Implemented | Dropdown with Settings, Plans & Billing, Sign Out |
+| Settings Page | ✅ Implemented | Account + Project tabs, team members, permissions |
 
 ---
 
 ## Recent Updates & Features
 
-### Auth-Aware Recent Projects (v1.7.0 - Latest)
+### Settings Panel & Project Collaboration (v1.8.0 - Latest)
+
+**Settings Page** (`/settings`):
+- New Settings page with Account and Project tabs
+- **Account tab**: Profile (email, member since), Plan & Billing (current plan, upgrade link, refresh status), Preferences (theme, auto-save), Sign out
+- **Project tab**: Visible when a .3dm file is open. Enable collaboration to register project in cloud. Team members list, invite by email with role, change role, remove member. Permission levels legend (Owner, Editor, Viewer)
+- TitleBar gear icon and UserMenu now link to Settings (Dashboard renamed to Plans & Billing)
+
+**Project & Member API**:
+- Backend endpoints: `POST /api/projects`, `GET /api/projects/user-projects`, `GET /api/projects/by-path`, `GET/POST/PUT/DELETE /api/projects/:id/members`
+- Frontend `projectAPI` in `src/lib/project-api.ts` calls these endpoints
+- `project_members` table in Supabase (run `PROJECT_MEMBERS_MIGRATION.sql`)
+
+**Permissions**:
+- Owner: Full access, manage members, change roles
+- Editor: Invite members, commit, branch, pull
+- Viewer: Read-only
+
+### Auth-Aware Recent Projects (v1.7.0)
 
 **Per-User Recent Projects**:
 - Recent projects are now stored per user in localStorage (`0studio_recent_projects_${userId}`)
@@ -1462,7 +1531,7 @@ This section documents features that are partially implemented or have known gap
 - **Branch Loading on Open**: When opening (native dialog or recent projects), `setCurrentModel(filePath)` is awaited first—loads branches/commits from `0studio_{filename}/` before createInitialCommit, so version history is restored
 - **3D Background**: Canvas and grid always visible behind the panel
 - **Recent Projects**: Stored per-user in localStorage (RecentProjectsContext), max 10 items. Hidden when signed out, restored when user signs back in.
-- **Settings**: Moved to TitleBar (gear icon to right of username, links to dashboard)
+- **Settings**: Moved to TitleBar (gear icon to right of username, links to /settings)
 - **Conditional Panel Layout**: Resizable version control panel only shown when model is loaded
 
 **Cleaner Branching UI**:
@@ -1580,19 +1649,20 @@ This section documents features that are partially implemented or have known gap
     - Always wrap pages with both providers if using ModelProvider
     - Dashboard and Checkout pages require both providers for TitleBar to work correctly
     - Checkout page wraps its return statements with providers (not at route level)
-12. **UserMenu**: Clicking user email in TitleBar opens dropdown menu with Dashboard and Sign Out options
-13. **Gallery Mode**: 
+12. **UserMenu**: Clicking user email in TitleBar opens dropdown with Settings, Plans & Billing, Sign Out
+13. **Settings & Project API**: Use `projectAPI` from `src/lib/project-api.ts` for project registration, members, invites. Run `PROJECT_MEMBERS_MIGRATION.sql` in Supabase before using. Permission checks: owners can manage members; editors can invite
+14. **Gallery Mode**: 
     - Maximum 4 commits can be selected
     - Reset gallery mode state when closing project
     - Use explicit grid positioning for 4-commit layout
-14. **Branching**:
+15. **Branching**:
     - Branches are created automatically when committing from a non-head commit (pulledCommitId set)
     - Use `getCommitVersionLabel()` to get proper version labels (v1, v2, v3a, v3b)
     - Check `pulledCommitId` to determine if user is about to create a new branch
     - `switchBranch()` changes active branch, `keepBranch()` marks a branch as main
     - Branch colors are assigned from `BRANCH_COLORS` array in order of creation
     - Reset branches when closing project via `clearCurrentModel()`
-15. **Local File Storage**:
+16. **Local File Storage**:
     - Commit files stored in `0studio_{filename}/` folder as `commit-{commitId}.3dm`
     - Tree.json stored in same folder, contains full branch and commit metadata
     - File paths are NOT hardcoded - dynamically constructed from .3dm file path using `dirname()` and `basename()`
@@ -1603,7 +1673,7 @@ This section documents features that are partially implemented or have known gap
     - Save tree.json before project close to ensure persistence
     - Handle errors gracefully (log warnings, don't throw)
 
-16. **Building for Distribution**:
+17. **Building for Distribution**:
     - Run `npm run build:all` for complete production build
     - Icon must be 1024x1024 PNG for proper .icns conversion
     - DMG output goes to `dist-electron/` directory

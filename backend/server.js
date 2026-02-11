@@ -286,6 +286,419 @@ app.delete('/api/aws/delete-version', verifyAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to delete version' });
   }
 });
+// ==================== PROJECT & MEMBER ENDPOINTS ====================
+
+// Register a project in the cloud
+app.post('/api/projects', verifyAuth, async (req, res) => {
+  try {
+    const { name, file_path } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Missing project name' });
+    }
+
+    // Check if project already exists for this file path and user
+    if (file_path) {
+      const { data: existing } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('owner_id', req.user.id)
+        .eq('s3_key', file_path)
+        .single();
+
+      if (existing) {
+        return res.json(existing);
+      }
+    }
+
+    const s3Key = file_path || `org-${req.user.id}/project-${Date.now()}`;
+
+    const { data: project, error } = await supabase
+      .from('projects')
+      .insert({
+        name,
+        s3_key: s3Key,
+        owner_id: req.user.id,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating project:', error);
+      return res.status(500).json({ error: 'Failed to create project' });
+    }
+
+    // Auto-add the creator as owner in project_members
+    await supabase.from('project_members').insert({
+      project_id: project.id,
+      user_id: req.user.id,
+      email: req.user.email,
+      role: 'owner',
+      invited_by: req.user.id,
+      status: 'active',
+    });
+
+    console.log('✅ Project registered:', project.id, name);
+    res.json(project);
+  } catch (error) {
+    console.error('Error registering project:', error);
+    res.status(500).json({ error: 'Failed to register project' });
+  }
+});
+
+// Get projects the user owns or is a member of
+app.get('/api/projects/user-projects', verifyAuth, async (req, res) => {
+  try {
+    // Get projects user owns
+    const { data: ownedProjects, error: ownedError } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('owner_id', req.user.id)
+      .order('created_at', { ascending: false });
+
+    if (ownedError) {
+      console.error('Error fetching owned projects:', ownedError);
+      return res.status(500).json({ error: 'Failed to fetch projects' });
+    }
+
+    // Get projects user is a member of (not owner)
+    const { data: memberships, error: memberError } = await supabase
+      .from('project_members')
+      .select('project_id')
+      .eq('user_id', req.user.id)
+      .eq('status', 'active')
+      .neq('role', 'owner');
+
+    if (memberError) {
+      console.error('Error fetching memberships:', memberError);
+      return res.status(500).json({ error: 'Failed to fetch projects' });
+    }
+
+    let memberProjects = [];
+    if (memberships && memberships.length > 0) {
+      const projectIds = memberships.map(m => m.project_id);
+      const { data: projects, error: projError } = await supabase
+        .from('projects')
+        .select('*')
+        .in('id', projectIds)
+        .order('created_at', { ascending: false });
+
+      if (!projError && projects) {
+        memberProjects = projects;
+      }
+    }
+
+    // Combine and deduplicate
+    const allProjects = [...(ownedProjects || []), ...memberProjects];
+    const seen = new Set();
+    const unique = allProjects.filter(p => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+
+    res.json({ projects: unique });
+  } catch (error) {
+    console.error('Error fetching user projects:', error);
+    res.status(500).json({ error: 'Failed to fetch projects' });
+  }
+});
+
+// Get project by file path
+app.get('/api/projects/by-path', verifyAuth, async (req, res) => {
+  try {
+    const { file_path } = req.query;
+
+    if (!file_path) {
+      return res.status(400).json({ error: 'Missing file_path parameter' });
+    }
+
+    // Check if user owns or is a member of this project
+    const { data: project, error } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('s3_key', file_path)
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    if (error) {
+      console.error('Error fetching project:', error);
+      return res.status(500).json({ error: 'Failed to fetch project' });
+    }
+
+    // Verify user has access
+    if (project.owner_id !== req.user.id) {
+      const { data: membership } = await supabase
+        .from('project_members')
+        .select('*')
+        .eq('project_id', project.id)
+        .eq('user_id', req.user.id)
+        .eq('status', 'active')
+        .single();
+
+      if (!membership) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    res.json(project);
+  } catch (error) {
+    console.error('Error fetching project by path:', error);
+    res.status(500).json({ error: 'Failed to fetch project' });
+  }
+});
+
+// Helper: check if user has specific role or higher on a project
+async function checkProjectPermission(projectId, userId, minRole = 'viewer') {
+  const roleHierarchy = { owner: 3, editor: 2, viewer: 1 };
+
+  // Check if user is project owner
+  const { data: project } = await supabase
+    .from('projects')
+    .select('owner_id')
+    .eq('id', projectId)
+    .single();
+
+  if (project && project.owner_id === userId) {
+    return { allowed: true, role: 'owner' };
+  }
+
+  // Check project_members table
+  const { data: membership } = await supabase
+    .from('project_members')
+    .select('role')
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .single();
+
+  if (!membership) {
+    return { allowed: false, role: null };
+  }
+
+  const userLevel = roleHierarchy[membership.role] || 0;
+  const requiredLevel = roleHierarchy[minRole] || 0;
+
+  return {
+    allowed: userLevel >= requiredLevel,
+    role: membership.role,
+  };
+}
+
+// Get project members
+app.get('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    // Check user has at least viewer access
+    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer');
+    if (!permission.allowed) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { data: members, error } = await supabase
+      .from('project_members')
+      .select('*')
+      .eq('project_id', projectId)
+      .neq('status', 'removed')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching members:', error);
+      return res.status(500).json({ error: 'Failed to fetch members' });
+    }
+
+    res.json({ members: members || [] });
+  } catch (error) {
+    console.error('Error fetching project members:', error);
+    res.status(500).json({ error: 'Failed to fetch members' });
+  }
+});
+
+// Invite a member to a project
+app.post('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { email, role = 'viewer' } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Missing email parameter' });
+    }
+
+    if (!['owner', 'editor', 'viewer'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role. Must be owner, editor, or viewer' });
+    }
+
+    // Check user has owner or editor access to invite
+    const permission = await checkProjectPermission(projectId, req.user.id, 'editor');
+    if (!permission.allowed) {
+      return res.status(403).json({ error: 'You need editor or owner access to invite members' });
+    }
+
+    // Only owners can invite other owners
+    if (role === 'owner' && permission.role !== 'owner') {
+      return res.status(403).json({ error: 'Only project owners can assign the owner role' });
+    }
+
+    // Check if member already exists
+    const { data: existing } = await supabase
+      .from('project_members')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('email', email.toLowerCase())
+      .neq('status', 'removed')
+      .single();
+
+    if (existing) {
+      return res.status(409).json({ error: 'User is already a member of this project' });
+    }
+
+    // Try to find the user by email in Supabase auth
+    let userId = null;
+    const { data: userData } = await supabase.auth.admin.listUsers();
+    if (userData?.users) {
+      const matchedUser = userData.users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+      if (matchedUser) {
+        userId = matchedUser.id;
+      }
+    }
+
+    // Create the member record
+    const { data: member, error } = await supabase
+      .from('project_members')
+      .insert({
+        project_id: projectId,
+        user_id: userId,
+        email: email.toLowerCase(),
+        role,
+        invited_by: req.user.id,
+        status: userId ? 'active' : 'pending',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error inviting member:', error);
+      return res.status(500).json({ error: 'Failed to invite member' });
+    }
+
+    console.log('✅ Member invited:', email, 'as', role, 'to project', projectId);
+    res.json({ member });
+  } catch (error) {
+    console.error('Error inviting member:', error);
+    res.status(500).json({ error: 'Failed to invite member' });
+  }
+});
+
+// Update a member's role
+app.put('/api/projects/:projectId/members/:memberId/role', verifyAuth, async (req, res) => {
+  try {
+    const { projectId, memberId } = req.params;
+    const { role } = req.body;
+
+    if (!role || !['owner', 'editor', 'viewer'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role. Must be owner, editor, or viewer' });
+    }
+
+    // Check user has owner access to change roles
+    const permission = await checkProjectPermission(projectId, req.user.id, 'owner');
+    if (!permission.allowed) {
+      return res.status(403).json({ error: 'Only project owners can change member roles' });
+    }
+
+    // Don't allow changing your own role (prevent accidental lockout)
+    const { data: targetMember } = await supabase
+      .from('project_members')
+      .select('*')
+      .eq('id', memberId)
+      .eq('project_id', projectId)
+      .single();
+
+    if (!targetMember) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    if (targetMember.user_id === req.user.id) {
+      return res.status(400).json({ error: 'Cannot change your own role' });
+    }
+
+    const { data: updatedMember, error } = await supabase
+      .from('project_members')
+      .update({
+        role,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', memberId)
+      .eq('project_id', projectId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating member role:', error);
+      return res.status(500).json({ error: 'Failed to update role' });
+    }
+
+    console.log('✅ Member role updated:', memberId, 'to', role);
+    res.json({ member: updatedMember });
+  } catch (error) {
+    console.error('Error updating member role:', error);
+    res.status(500).json({ error: 'Failed to update role' });
+  }
+});
+
+// Remove a member from a project
+app.delete('/api/projects/:projectId/members/:memberId', verifyAuth, async (req, res) => {
+  try {
+    const { projectId, memberId } = req.params;
+
+    // Check user has owner access
+    const permission = await checkProjectPermission(projectId, req.user.id, 'owner');
+    if (!permission.allowed) {
+      return res.status(403).json({ error: 'Only project owners can remove members' });
+    }
+
+    // Don't allow removing yourself
+    const { data: targetMember } = await supabase
+      .from('project_members')
+      .select('*')
+      .eq('id', memberId)
+      .eq('project_id', projectId)
+      .single();
+
+    if (!targetMember) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    if (targetMember.user_id === req.user.id) {
+      return res.status(400).json({ error: 'Cannot remove yourself from the project' });
+    }
+
+    // Soft delete - mark as removed
+    const { error } = await supabase
+      .from('project_members')
+      .update({
+        status: 'removed',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', memberId)
+      .eq('project_id', projectId);
+
+    if (error) {
+      console.error('Error removing member:', error);
+      return res.status(500).json({ error: 'Failed to remove member' });
+    }
+
+    console.log('✅ Member removed:', memberId, 'from project', projectId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error removing member:', error);
+    res.status(500).json({ error: 'Failed to remove member' });
+  }
+});
+
 // ==================== STRIPE PAYMENT ENDPOINTS ====================
 
 // Create Stripe Checkout Session

@@ -29,7 +29,7 @@ export const TitleBar = () => {
       <div className="min-w-[5rem] flex items-center justify-end gap-1" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
         <UserMenu />
         <Link
-          to="/dashboard"
+          to="/settings"
           className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
           title="Settings"
         >

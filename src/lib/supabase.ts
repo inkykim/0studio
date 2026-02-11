@@ -170,6 +170,21 @@ export interface Branch {
   head_commit_id: string | null;
 }
 
+export type ProjectMemberRole = 'owner' | 'editor' | 'viewer';
+export type ProjectMemberStatus = 'pending' | 'active' | 'removed';
+
+export interface ProjectMember {
+  id: string;
+  project_id: string;
+  user_id: string | null;
+  email: string;
+  role: ProjectMemberRole;
+  invited_by: string | null;
+  status: ProjectMemberStatus;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -187,6 +202,11 @@ export interface Database {
         Row: Branch;
         Insert: Omit<Branch, 'id'>;
         Update: Partial<Omit<Branch, 'id'>>;
+      };
+      project_members: {
+        Row: ProjectMember;
+        Insert: Omit<ProjectMember, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<ProjectMember, 'id' | 'created_at'>>;
       };
     };
   };

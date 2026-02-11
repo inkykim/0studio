@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3 } from "lucide-react";
+import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3, ArrowLeft } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 
@@ -482,45 +482,35 @@ export const VersionControl = () => {
     return filtered;
   }, [commits, showStarredOnly, searchQuery]);
 
-  if (!currentFile) {
-    return (
-      <div className="h-full flex flex-col panel-glass">
-        <div className="panel-header flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Archive className="w-4 h-4 text-primary" />
-            <span className="font-medium text-sm">Version Control</span>
-          </div>
-        </div>
-        
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <Archive className="w-12 h-12 text-muted-foreground mb-3" />
-          <p className="text-sm text-muted-foreground">No model open</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="h-full flex flex-col panel-glass">
-      {/* Header */}
-      <div className="panel-header flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Archive className="w-4 h-4 text-primary" />
-          <span className="font-medium text-sm">Version Control</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+      {/* Header: back to all projects + current project name */}
+      <div className="panel-header flex items-center gap-2 min-w-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleCloseModel}
+          className="h-6 px-2 shrink-0"
+          title="Back to all projects"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+        </Button>
+        <span className="font-medium text-sm truncate min-w-0" title={fileName ?? currentFile ?? undefined}>
+          {fileName ?? "Project"}
+        </span>
+        <div className="flex items-center gap-1 ml-auto shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleOpenNewModel}
             className="h-6 px-2"
             title="Open new model"
           >
             <FolderOpen className="w-3 h-3" />
           </Button>
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleCloseModel}
             className="h-6 px-2"
             title="Close model"
