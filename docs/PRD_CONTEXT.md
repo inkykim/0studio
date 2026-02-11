@@ -368,9 +368,10 @@
 - **Initial Page / Welcome Panel** (when no model loaded): Cursor-style centered layout
   - 0studio branding at top
   - Glass-effect card with "Open project" and "Import .3dm file" buttons
-  - Recent projects list (stored in localStorage, up to 10 items)
+  - Recent projects list (stored per-user in localStorage, up to 10 items)
+  - Shows "Sign in to see your recent projects" when signed out
   - 3D canvas visible in background (grid + default scene)
-  - Recent projects clickable in Electron to reopen by path
+  - Recent projects clickable in Electron to reopen by path (when signed in)
 - Loading and error states
 - **Gallery Mode**: Adaptive grid layouts for comparing multiple commits
   - 1 model: Full view
@@ -542,22 +543,28 @@
 - Loads payment status from backend API on login
 - Payment status checked before cloud pull operations
 - Dashboard uses AuthContext to check current plan
+- RecentProjectsContext uses `user.id` to store/load per-user recent projects
 
 ### RecentProjectsContext
 
 **Purpose**: Tracks recently opened .3dm projects for quick access on the welcome screen
 
-**Storage**: localStorage (`0studio_recent_projects`), max 10 items
+**Storage**: localStorage (`0studio_recent_projects_${userId}`), max 10 items, **per-user**
 
 **Key State**:
 - `recentProjects`: Array of `{ name, path, openedAt }`
 
 **Key Methods**:
-- `addRecentProject(path, name?)`: Add project to list (called when project opened via Electron)
+- `addRecentProject(path, name?)`: Add project to list (called when project opened via Electron). No-op when signed out.
 - `removeRecentProject(path)`: Remove from list
 - `clearRecentProjects()`: Clear all
 
-**Integration**: ModelContext calls `addRecentProject()` on project-opened event. Welcome panel displays list; clicking opens via `desktopAPI.openProjectByPath()` (Electron only). When opening (native dialog or recent projects), ModelContext awaits `setCurrentModel(filePath)` before `createInitialCommit`—ensures branches/commits load from `0studio_{filename}/` folder.
+**Auth-Aware Behavior**:
+- **Signed out**: `recentProjects` is empty array. Projects are not tracked. Welcome panel shows "Sign in to see your recent projects."
+- **Signed in**: Loads recent projects for that user from `localStorage` using `0studio_recent_projects_${user.id}` key. Projects opened while signed in are added to the list.
+- **Account switching**: When user signs out/in or switches accounts, the list updates to show that account's recent projects.
+
+**Integration**: Uses `useAuth()` to get current user. ModelContext calls `addRecentProject()` on project-opened event. Welcome panel displays list when signed in; clicking opens via `desktopAPI.openProjectByPath()` (Electron only). When opening (native dialog or recent projects), ModelContext awaits `setCurrentModel(filePath)` before `createInitialCommit`—ensures branches/commits load from `0studio_{filename}/` folder.
 
 ### DesktopAPI Service
 
@@ -1358,7 +1365,27 @@ This section documents features that are partially implemented or have known gap
 
 ## Recent Updates & Features
 
-### Free Plan Import & Subscription Changes (v1.6.0 - Latest)
+### Auth-Aware Recent Projects (v1.7.0 - Latest)
+
+**Per-User Recent Projects**:
+- Recent projects are now stored per user in localStorage (`0studio_recent_projects_${userId}`)
+- Each user account has its own isolated list of recent projects
+- When user signs out, recent projects list is hidden
+- When user signs in, their recent projects list reappears
+- Projects opened while signed out are not tracked
+
+**Welcome Panel Changes**:
+- Shows "Sign in to see your recent projects" when signed out
+- Shows user's recent projects list when signed in
+- Clicking a recent project opens it in 0studio (Electron only)
+
+**RecentProjectsContext Changes**:
+- Now uses `useAuth()` to get current user
+- `addRecentProject()` is a no-op when signed out
+- List automatically updates when user signs in/out or switches accounts
+- Storage key includes user ID: `0studio_recent_projects_${user.id}`
+
+### Free Plan Import & Subscription Changes (v1.6.0)
 
 **Import Available on Free Plan**:
 - Removed subscription requirement from model import
@@ -1430,10 +1457,11 @@ This section documents features that are partially implemented or have known gap
 - **Welcome Panel**: Glass-effect card (backdrop-blur) with:
   - "Open project" primary button (folder icon, opens native dialog in Electron)
   - "Import .3dm file" secondary button
-  - Recent projects list (name + shortened path, clickable in Electron)
+  - Recent projects list (name + shortened path, clickable in Electron when signed in)
+  - Shows "Sign in to see your recent projects" when signed out
 - **Branch Loading on Open**: When opening (native dialog or recent projects), `setCurrentModel(filePath)` is awaited first—loads branches/commits from `0studio_{filename}/` before createInitialCommit, so version history is restored
 - **3D Background**: Canvas and grid always visible behind the panel
-- **Recent Projects**: Stored in localStorage (RecentProjectsContext), max 10 items
+- **Recent Projects**: Stored per-user in localStorage (RecentProjectsContext), max 10 items. Hidden when signed out, restored when user signs back in.
 - **Settings**: Moved to TitleBar (gear icon to right of username, links to dashboard)
 - **Conditional Panel Layout**: Resizable version control panel only shown when model is loaded
 

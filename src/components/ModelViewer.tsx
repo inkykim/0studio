@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { useModel, SceneStats, GeneratedObject, LoadedModel } from "@/contexts/ModelContext";
 import { useVersionControl } from "@/contexts/VersionControlContext";
 import { useRecentProjects } from "@/contexts/RecentProjectsContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useDesktopAPI } from "@/lib/desktop-api";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -41,9 +42,11 @@ function WelcomePanel({
   triggerFileDialog: () => void;
   onDragDropHint: string;
 }) {
+  const { user } = useAuth();
   const { recentProjects } = useRecentProjects();
   const desktopAPI = useDesktopAPI();
   const isDesktop = desktopAPI.isDesktop;
+  const signedIn = !!user;
 
   const handleOpenRecent = async (path: string) => {
     if (isDesktop) {
@@ -99,7 +102,11 @@ function WelcomePanel({
               )}
             </div>
             <div className="max-h-40 overflow-auto space-y-0.5">
-              {recentProjects.length === 0 ? (
+              {!signedIn ? (
+                <p className="text-sm text-muted-foreground/70 py-2">
+                  Sign in to see your recent projects.
+                </p>
+              ) : recentProjects.length === 0 ? (
                 <p className="text-sm text-muted-foreground/70 py-2">
                   No recent projects. Open a .3dm file to get started.
                 </p>
