@@ -6,6 +6,7 @@ const electron_1 = require("electron");
 electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     // Project management
     openProjectDialog: () => electron_1.ipcRenderer.invoke('open-project-dialog'),
+    openProjectByPath: (filePath) => electron_1.ipcRenderer.invoke('open-project-by-path', filePath),
     getCurrentProject: () => electron_1.ipcRenderer.invoke('get-current-project'),
     closeProject: () => electron_1.ipcRenderer.invoke('close-project'),
     // Version control

@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import { useAuth } from "@/contexts/AuthContext";
 import { InteractivePricingCard } from '@/components/ui/pricing';
 import { TitleBar } from "@/components/TitleBar";
-import { ModelProvider } from "@/contexts/ModelContext";
-import { VersionControlProvider } from "@/contexts/VersionControlContext";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -66,10 +64,8 @@ export default function Dashboard() {
   };
 
   return (
-    <VersionControlProvider>
-      <ModelProvider>
-        <div className="h-screen flex flex-col bg-background overflow-hidden">
-          <TitleBar />
+    <div className="h-screen flex flex-col bg-background overflow-hidden">
+      <TitleBar />
           <div className="flex-1 overflow-auto relative">
             {/* Header with back button and current plan - positioned absolutely */}
             <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-10 space-y-4 text-center">
@@ -166,7 +162,5 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-      </ModelProvider>
-    </VersionControlProvider>
   );
 }

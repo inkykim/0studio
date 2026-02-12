@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useModel } from '@/contexts/ModelContext';
 import { TitleBar } from '@/components/TitleBar';
-import { ModelProvider } from '@/contexts/ModelContext';
-import { VersionControlProvider } from '@/contexts/VersionControlContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -690,13 +688,9 @@ function SettingsContent() {
 
 export default function Settings() {
   return (
-    <VersionControlProvider>
-      <ModelProvider>
-        <div className="h-screen flex flex-col bg-background overflow-hidden">
-          <TitleBar />
-          <SettingsContent />
-        </div>
-      </ModelProvider>
-    </VersionControlProvider>
+    <div className="h-screen flex flex-col bg-background overflow-hidden">
+      <TitleBar />
+      <SettingsContent />
+    </div>
   );
 }

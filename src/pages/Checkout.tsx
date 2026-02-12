@@ -8,8 +8,6 @@ import {
   useElements,
 } from '@stripe/react-stripe-js';
 import { useAuth } from '@/contexts/AuthContext';
-import { ModelProvider } from '@/contexts/ModelContext';
-import { VersionControlProvider } from '@/contexts/VersionControlContext';
 import { TitleBar } from '@/components/TitleBar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -234,52 +232,42 @@ export default function Checkout() {
   // Show loading while auth is initializing
   if (authLoading) {
     return (
-      <VersionControlProvider>
-        <ModelProvider>
-          <div className="h-screen flex flex-col bg-background">
-            <TitleBar />
-            <div className="flex-1 flex items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          </div>
-        </ModelProvider>
-      </VersionControlProvider>
+      <div className="h-screen flex flex-col bg-background">
+        <TitleBar />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
     );
   }
 
   if (!stripePromise) {
     return (
-      <VersionControlProvider>
-        <ModelProvider>
-          <div className="h-screen flex flex-col bg-background">
-            <TitleBar />
-            <div className="flex-1 flex items-center justify-center">
-              <Card className="w-full max-w-md">
-                <CardHeader>
-                  <CardTitle>Configuration Error</CardTitle>
-                  <CardDescription>
-                    Stripe is not configured. Please add VITE_STRIPE_PUBLISHABLE_KEY to your environment.
-                  </CardDescription>
-                </CardHeader>
-                <CardFooter>
-                  <Button onClick={() => navigate('/dashboard')} className="w-full">
-                    Go Back
-                  </Button>
-                </CardFooter>
-              </Card>
-            </div>
-          </div>
-        </ModelProvider>
-      </VersionControlProvider>
+      <div className="h-screen flex flex-col bg-background">
+        <TitleBar />
+        <div className="flex-1 flex items-center justify-center">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Configuration Error</CardTitle>
+              <CardDescription>
+                Stripe is not configured. Please add VITE_STRIPE_PUBLISHABLE_KEY to your environment.
+              </CardDescription>
+            </CardHeader>
+            <CardFooter>
+              <Button onClick={() => navigate('/dashboard')} className="w-full">
+                Go Back
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+      </div>
     );
   }
 
   return (
-    <VersionControlProvider>
-      <ModelProvider>
-        <div className="h-screen flex flex-col bg-background overflow-hidden">
-          <TitleBar />
-          <div className="flex-1 overflow-auto">
+    <div className="h-screen flex flex-col bg-background overflow-hidden">
+      <TitleBar />
+      <div className="flex-1 overflow-auto">
             <div className="container max-w-4xl mx-auto py-8 px-4">
               <div className="flex items-center justify-between mb-6">
                 <Button
@@ -377,7 +365,5 @@ export default function Checkout() {
             </div>
           </div>
         </div>
-      </ModelProvider>
-    </VersionControlProvider>
   );
 }
