@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectVersionsCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { createClient } from '@supabase/supabase-js';
 import rateLimit from 'express-rate-limit';
 import Stripe from 'stripe';
@@ -40,6 +41,15 @@ const s3Client = new S3Client({
 });
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME;
+
+// SES client for invite emails (uses same AWS creds as S3)
+const sesClient = new SESClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+    ? { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY }
+    : undefined,
+});
+const INVITE_FROM_EMAIL = process.env.INVITE_FROM_EMAIL; // Verified sender in SES
 
 // Initialize Supabase client for auth verification
 if (!process.env.SUPABASE_URL) {
@@ -488,6 +498,47 @@ async function checkProjectPermission(projectId, userId, minRole = 'viewer') {
   };
 }
 
+// Send project invite email via Amazon SES (no-op if INVITE_FROM_EMAIL not set)
+async function sendProjectInviteEmail({ toEmail, projectName, inviterEmail, role, appUrl }) {
+  if (!INVITE_FROM_EMAIL) {
+    console.log('⏭️ Skipping invite email (INVITE_FROM_EMAIL not set)');
+    return;
+  }
+  const appLink = appUrl || process.env.FRONTEND_URL || 'http://localhost:5173';
+  const subject = `You're invited to the project "${projectName}" on 0studio`;
+  const text = `${inviterEmail} invited you to the project "${projectName}" as ${role}.\n\nOpen 0studio and sign in to see the project: ${appLink}`;
+  const html = `
+    <p>${escapeHtml(inviterEmail)} invited you to the project <strong>${escapeHtml(projectName)}</strong> as <strong>${escapeHtml(role)}</strong>.</p>
+    <p><a href="${escapeHtml(appLink)}">Open 0studio</a> and sign in to see the project.</p>
+  `.trim();
+  try {
+    const command = new SendEmailCommand({
+      Source: INVITE_FROM_EMAIL,
+      Destination: { ToAddresses: [toEmail] },
+      Message: {
+        Subject: { Data: subject, Charset: 'UTF-8' },
+        Body: {
+          Text: { Data: text, Charset: 'UTF-8' },
+          Html: { Data: html, Charset: 'UTF-8' },
+        },
+      },
+    });
+    await sesClient.send(command);
+    console.log('✅ Invite email sent to', toEmail);
+  } catch (err) {
+    console.error('Failed to send invite email:', err);
+  }
+}
+
+function escapeHtml(s) {
+  if (typeof s !== 'string') return '';
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // Get project members
 app.get('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
   try {
@@ -586,6 +637,22 @@ app.post('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
     }
 
     console.log('✅ Member invited:', email, 'as', role, 'to project', projectId);
+
+    // Send invite email via SES (same AWS creds; does not fail the request if email fails)
+    const { data: project } = await supabase
+      .from('projects')
+      .select('name')
+      .eq('id', projectId)
+      .single();
+    const projectName = project?.name || 'Unnamed project';
+    await sendProjectInviteEmail({
+      toEmail: email.toLowerCase(),
+      projectName,
+      inviterEmail: req.user.email || 'A team member',
+      role,
+      appUrl: process.env.FRONTEND_URL,
+    });
+
     res.json({ member });
   } catch (error) {
     console.error('Error inviting member:', error);
