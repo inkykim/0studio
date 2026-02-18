@@ -174,6 +174,12 @@ class DesktopAPIService {
     return (window.electronAPI as any).validateCommitFiles(filePath, commitIds);
   }
 
+  // Save file dialog
+  async showSaveDialog(options?: { defaultPath?: string, filters?: { name: string, extensions: string[] }[] }): Promise<string | null> {
+    if (!this.isElectron || !window.electronAPI) return null;
+    return window.electronAPI.showSaveDialog(options || {});
+  }
+
   // Event Listeners
   onProjectOpened(callback: (project: ProjectInfo) => void): void {
     if (!this.isElectron || !window.electronAPI) return;

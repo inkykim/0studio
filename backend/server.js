@@ -766,6 +766,115 @@ app.delete('/api/projects/:projectId/members/:memberId', verifyAuth, async (req,
   }
 });
 
+// ==================== PROJECT SYNC ENDPOINTS ====================
+// Cloud file sharing: project-scoped S3 operations with member permission checks
+// S3 key format: projects/{projectId}/commits/{commitId}.3dm
+//                projects/{projectId}/tree.json
+
+app.use('/api/projects/:projectId/sync', limiter);
+
+// Get a presigned upload URL for a project file
+app.post('/api/projects/:projectId/sync/push-url', verifyAuth, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { file_key } = req.body;
+
+    if (!file_key) {
+      return res.status(400).json({ error: 'Missing file_key parameter' });
+    }
+
+    const permission = await checkProjectPermission(projectId, req.user.id, 'editor');
+    if (!permission.allowed) {
+      return res.status(403).json({ error: 'You need editor or owner access to push files' });
+    }
+
+    const s3Key = `projects/${projectId}/${file_key}`;
+
+    const command = new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: s3Key,
+    });
+
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+
+    res.json({ upload_url: url, s3_key: s3Key });
+  } catch (error) {
+    console.error('Error generating sync push URL:', error);
+    res.status(500).json({ error: 'Failed to generate upload URL' });
+  }
+});
+
+// Get a presigned download URL for a project file
+app.post('/api/projects/:projectId/sync/pull-url', verifyAuth, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { file_key } = req.body;
+
+    if (!file_key) {
+      return res.status(400).json({ error: 'Missing file_key parameter' });
+    }
+
+    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer');
+    if (!permission.allowed) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const s3Key = `projects/${projectId}/${file_key}`;
+
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: s3Key,
+    });
+
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+
+    res.json({ download_url: url, s3_key: s3Key });
+  } catch (error) {
+    console.error('Error generating sync pull URL:', error);
+
+    if (error.name === 'NoSuchKey' || error.Code === 'NoSuchKey') {
+      return res.status(404).json({ error: 'File not found in cloud storage' });
+    }
+
+    res.status(500).json({ error: 'Failed to generate download URL' });
+  }
+});
+
+// List all synced files for a project
+app.get('/api/projects/:projectId/sync/list', verifyAuth, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer');
+    if (!permission.allowed) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const prefix = `projects/${projectId}/`;
+
+    const command = new ListObjectVersionsCommand({
+      Bucket: BUCKET_NAME,
+      Prefix: prefix,
+    });
+
+    const response = await s3Client.send(command);
+
+    const files = (response.Versions || [])
+      .filter(v => v.IsLatest)
+      .map(v => ({
+        key: v.Key,
+        file_key: v.Key.replace(prefix, ''),
+        size: v.Size,
+        lastModified: v.LastModified?.toISOString(),
+      }));
+
+    res.json({ files });
+  } catch (error) {
+    console.error('Error listing sync files:', error);
+    res.status(500).json({ error: 'Failed to list project files' });
+  }
+});
+
 // ==================== STRIPE PAYMENT ENDPOINTS ====================
 
 // Create Stripe Checkout Session

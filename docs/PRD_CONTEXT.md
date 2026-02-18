@@ -1,7 +1,7 @@
 # 0studio - Product Requirements Document & System Architecture
 
-**Last Updated:** 2026-02-11  
-**Version:** 1.8.0  
+**Last Updated:** 2026-02-18  
+**Version:** 1.11.0  
 **Purpose:** Comprehensive context document for Cursor AI agent to reference during development
 
 ---
@@ -39,10 +39,11 @@
 - **macOS Native**: Built specifically for macOS with proper file associations
 - **Settings Panel**: User account settings and project settings with team collaboration
 - **Project Collaboration**: Invite members, manage roles (owner/editor/viewer), permissions
+- **Invite Emails**: Invited members receive an email notification via Amazon SES
+- **Cloud File Sharing**: Push/pull commit files to AWS S3 via project-scoped sync endpoints; collaborators can pull shared versions
 
 ### Planned Features (Not Yet Implemented)
 
-- **Cloud Storage**: Backend API ready, frontend integration pending
 - **Git Integration**: Service exists but IPC handlers not implemented
 
 ### Project Structure
@@ -162,6 +163,7 @@
 ### Cloud & Authentication
 - **@supabase/supabase-js 2.90.0**: Supabase client for auth and database
 - **AWS S3**: File storage with versioning (via backend API)
+- **AWS SES** (`@aws-sdk/client-ses`): Transactional invite emails (uses same AWS credentials as S3)
 
 ### Payments
 - **@stripe/stripe-js ^8.0.0**: Stripe client SDK
@@ -220,7 +222,8 @@
 │   │   ├── rhino3dm-service.ts   # Rhino file loading/exporting
 │   │   ├── supabase-api.ts      # Supabase database operations
 │   │   ├── project-api.ts       # Project & member management (backend API)
-│   │   ├── aws-api.ts           # AWS S3 operations
+│   │   ├── aws-api.ts           # AWS S3 presigned URL operations (AWSS3API class)
+│   │   ├── cloud-sync-service.ts # Cloud sync orchestration (push/pull commits + tree.json)
 │   │   ├── commit-storage.ts    # IndexedDB storage for commits
 │   │   └── utils.ts             # Utility functions
 │   │
@@ -283,15 +286,17 @@
 
 **`src/App.tsx`**
 - Root component
-- Sets up QueryClient, TooltipProvider, Toasters
-- Renders routing with React Router
+- Sets up QueryClient, AuthProvider, RecentProjectsProvider, HashRouter
+- **App-level providers**: Wraps all routes with `VersionControlProvider` then `ModelProvider` (order is required: ModelProvider uses `useVersionControl()`). This keeps model and version control state across navigation (e.g. return from payment or settings to same open project).
+- TooltipProvider, Toasters, and Routes are inside the provider tree
+- Index, Dashboard, Checkout, and Settings do not wrap with these providers; they consume context from App
 
 **`src/pages/Index.tsx`**
 - Main application layout with macOS-style title bar
 - **Conditional Panel Layout**: 
   - With model loaded: Resizable panels - VersionControl (30%) | ModelViewer (70%)
-  - Without model: Full-width ModelViewer with clean empty state
-- Wraps content in VersionControlProvider → ModelProvider (order matters!)
+  - Without model: Full-width ModelViewer with clean empty state (welcome panel with recent projects)
+- Uses ModelProvider and VersionControlProvider from App (does not wrap with providers)
 
 **`src/contexts/ModelContext.tsx`**
 - Manages 3D model state and operations
@@ -355,14 +360,21 @@
 - Uses Supabase session token for auth headers
 
 **`src/lib/aws-api.ts`**
-- AWS S3 API client classes (via backend API)
+- AWS S3 API client class (via backend API)
 - **AWSS3API class** (`awsS3API`): Methods for presigned URLs, upload/download, version listing
-  - Calls `/api/aws/*` backend endpoints which DO exist
-  - ⚠️ **NOT IMPORTED OR USED ANYWHERE** - dead code
-- **FilesAPI class** (`filesAPI`): Methods for model/version management
-  - Calls `/files/*` backend endpoints which DON'T exist
-  - ⚠️ **NOT WORKING** - backend endpoints not implemented
-- Both singleton instances exported but never used in the application
+  - Calls `/api/aws/*` backend endpoints (legacy per-user S3 operations)
+  - Available for direct S3 operations but cloud sync uses `cloud-sync-service.ts` instead
+
+**`src/lib/cloud-sync-service.ts`**
+- Cloud sync orchestration service for project file sharing
+- **CloudSyncService class** (`cloudSyncService`): Methods for push/pull operations
+  - `pushCommitFile(projectId, commitId, fileBuffer)`: Upload commit .3dm to S3
+  - `pullCommitFile(projectId, commitId)`: Download commit .3dm from S3
+  - `pushTreeJson(projectId, treeData)`: Upload tree.json metadata to S3
+  - `pullTreeJson(projectId)`: Download tree.json metadata from S3
+  - `computeSyncStatus(local, synced, remote)`: Compare commit sets to determine sync state
+  - Calls `/api/projects/:id/sync/*` backend endpoints with project-scoped access control
+- Used by `VersionControlContext` for `pushToCloud()` and `pullFromCloud()` methods
 
 **`src/components/ModelViewer.tsx`**
 - React Three Fiber canvas for 3D rendering
@@ -422,8 +434,9 @@
 **`src/pages/Settings.tsx`**
 - Settings page with two tabs: Account and Project
 - **Account tab**: Profile (email, member since), Plan & Billing (current plan, upgrade/change plan, refresh status), Preferences (theme, auto-save), Sign out
-- **Project tab**: Visible when a .3dm file is open. Enables "Enable collaboration" to register project in cloud. Team members list with role badges (owner/editor/viewer), invite form (email + role), role change and remove member (owners only). Permissions legend explains role capabilities.
+- **Project tab**: Uses app-level ModelContext; when user had a project open before navigating to Settings, the Project tab shows that project (enable collaboration, members, invites). If no project is open, shows "No project open" with guidance. Team members list with role badges (owner/editor/viewer), invite form (email + role), role change and remove member (owners only). Permissions legend explains role capabilities.
 - Uses `projectAPI` from `src/lib/project-api.ts` for backend calls
+- Does not wrap with ModelProvider/VersionControlProvider; consumes context from App
 
 **`src/pages/Dashboard.tsx`**
 - Plans & Billing UI for selecting payment plans
@@ -432,7 +445,7 @@
 - Navigates to custom `/checkout` page when user selects a plan
 - Handles Stripe redirect callbacks (success/cancel)
 - Accessible via `/dashboard` route
-- Requires both `VersionControlProvider` and `ModelProvider`
+- Uses app-level ModelProvider/VersionControlProvider (TitleBar and context available)
 
 **`src/pages/Checkout.tsx`**
 - Custom checkout page with embedded Stripe Elements
@@ -443,9 +456,9 @@
 - Shows loading state while auth initializes
 - Handles payment confirmation and redirects to dashboard on success
 - "Compare all plans" button links back to Dashboard
-- "Back to app" button returns to main app
+- "Back to app" button returns to main app (same open project is preserved via app-level providers)
 - Requires `VITE_STRIPE_PUBLISHABLE_KEY` environment variable
-- Requires both `VersionControlProvider` and `ModelProvider` (for TitleBar)
+- Uses app-level providers (does not wrap with ModelProvider/VersionControlProvider)
 
 **`src/lib/commit-storage.ts`**
 - IndexedDB storage for commit file buffers (legacy, used as fallback)
@@ -535,7 +548,14 @@
 - Uses FileStorageService (via desktopAPI) for local commit file storage
 - Uses tree.json for persisting branch/commit metadata
 
-**Note**: Cloud storage integration (Supabase + AWS S3) is NOT currently implemented in VersionControlContext. The backend API and service files exist for future integration, but the frontend context only handles local storage via the `0studio_{filename}/` folder structure.
+**Cloud Sync Integration**:
+- `cloudProject`: The registered cloud project (from `project_members` table), or null if not cloud-enabled
+- `cloudSyncedCommitIds`: Set of commit IDs that have been pushed to the cloud
+- `cloudSyncStatus`: `{ localOnly, remoteOnly, synced }` arrays of commit IDs
+- `isCloudSyncing`: Whether a push/pull operation is in progress
+- `pushToCloud()`: Upload unsynced commits + tree.json to S3
+- `pullFromCloud()`: Download remote tree.json, find new commits, download their files, merge into local state
+- `refreshCloudStatus()`: Compare local vs remote commit sets
 
 ### AuthContext
 
@@ -767,21 +787,22 @@
 - **Validated**: Checks for missing commit files and warns in console
 - **Backwards Compatible**: Falls back to localStorage if tree.json doesn't exist
 
-### Cloud Storage Architecture (Supabase + S3) - PLANNED
+### Cloud Storage Architecture (S3 Project-Scoped Sync) - IMPLEMENTED
 
-**⚠️ Implementation Status**: The backend API for cloud storage exists and is functional, but the frontend integration in VersionControlContext is NOT yet implemented. Currently, all version control is handled locally via the `0studio_{filename}/` folder structure.
+**Implementation Status**: Cloud file sharing is fully implemented with project-scoped S3 sync. Commit files and tree.json are pushed/pulled via presigned URLs with project member permission checks.
 
-**Overview**: The planned system uses a hybrid approach combining Supabase (database) and AWS S3 (file storage with versioning).
+**Overview**: The system uses project-scoped S3 keys with backend permission enforcement via `project_members` table. Each project gets its own S3 prefix.
 
-**Planned Storage Structure**:
+**Cloud Storage Structure**:
 ```
 S3 Bucket:
-└── org-{userId}/
-    └── project-{projectId}/
-         ├── models/
-         │     └── model.3dm  (S3 Version IDs: v1, v2, v3...)
-         └── textures/
-               └── texture.png
+└── projects/
+    └── {projectId}/
+         ├── tree.json                    # Branch/commit metadata (synced from local tree.json)
+         └── commits/
+               ├── {commitId1}.3dm        # Commit file versions
+               ├── {commitId2}.3dm
+               └── {commitId3}.3dm
 ```
 
 **Database Schema** (Supabase):
@@ -797,11 +818,11 @@ S3 Bucket:
 
 **Backend API Status**:
 - ✅ AWS S3 presigned upload/download URLs - Backend endpoints implemented (`/api/aws/*`)
+- ✅ Project-scoped sync endpoints - Implemented (`/api/projects/:id/sync/*`)
 - ✅ Stripe payment integration - Implemented
 - ✅ Payment status API - Implemented
 - ✅ Project & member endpoints - Implemented (`/api/projects/*`)
-- ❌ `/files/*` endpoints - NOT implemented (frontend FilesAPI expects these)
-- ❌ Frontend cloud sync integration - NOT implemented (awsS3API never called)
+- ✅ Frontend cloud sync integration - Implemented via `cloud-sync-service.ts` + `VersionControlContext`
 
 ---
 
@@ -874,9 +895,20 @@ S3 Bucket:
 - `GET /api/projects/user-projects` - List projects user owns or is a member of
 - `GET /api/projects/by-path?file_path=...` - Get project by file path
 - `GET /api/projects/:projectId/members` - List project members
-- `POST /api/projects/:projectId/members` - Invite member. Body: `{ email, role }` (role: owner | editor | viewer)
+- `POST /api/projects/:projectId/members` - Invite member. Body: `{ email, role }` (role: owner | editor | viewer). Sends invite email via SES if `INVITE_FROM_EMAIL` is configured.
 - `PUT /api/projects/:projectId/members/:memberId/role` - Update member role. Body: `{ role }`
 - `DELETE /api/projects/:projectId/members/:memberId` - Remove member (owners only)
+
+**Project Sync Operations** (all require auth + project membership):
+- `POST /api/projects/:projectId/sync/push-url` - Get presigned upload URL for a project file (editor+)
+  - Body: `{ file_key: string }` (e.g., `"tree.json"` or `"commits/{commitId}.3dm"`)
+  - Returns: `{ upload_url: string, s3_key: string }`
+  - S3 key format: `projects/{projectId}/{file_key}`
+- `POST /api/projects/:projectId/sync/pull-url` - Get presigned download URL for a project file (viewer+)
+  - Body: `{ file_key: string }`
+  - Returns: `{ download_url: string, s3_key: string }`
+- `GET /api/projects/:projectId/sync/list` - List all synced files for a project (viewer+)
+  - Returns: `{ files: [{ file_key, size, lastModified }] }`
 
 **Health Check**:
 - `GET /health` - Health check (no auth required)
@@ -1334,16 +1366,12 @@ This section documents features that are partially implemented or have known gap
 - **Workaround**: Version control works via local `tree.json` and commit files
 - **Fix Required**: Add `ipcMain.handle()` calls in main.ts that use GitService
 
-### Cloud Sync (Dead Code)
-- **Issue**: Frontend AWS client (`awsS3API`) exists in `src/lib/aws-api.ts` but is NEVER IMPORTED or used anywhere
-- **Backend Status**: `/api/aws/*` endpoints exist and are functional
-- **Frontend Status**: `awsS3API` class is dead code - never called from `VersionControlContext` or anywhere else
-- **FilesAPI Issue**: `filesAPI` class expects `/files/*` backend endpoints that DON'T EXIST
-- **Impact**: All version control is 100% local only - no cloud features work
-- **Fix Required**: 
-  1. Import `awsS3API` in `VersionControlContext`
-  2. Add push/pull methods that call `awsS3API.uploadFile()` and `awsS3API.downloadFile()`
-  3. Store S3 version IDs in commits for cloud versioning
+### Cloud Sync (Implemented)
+- **Status**: ✅ Fully implemented via project-scoped sync endpoints
+- **Backend**: New `/api/projects/:id/sync/*` endpoints with member permission checks
+- **Frontend**: `cloud-sync-service.ts` orchestrates push/pull; `VersionControlContext` exposes `pushToCloud()` and `pullFromCloud()`
+- **UI**: Cloud sync section in VersionControl.tsx with Push/Pull buttons and per-commit cloud indicators
+- **Legacy**: `awsS3API` class still exists for direct S3 operations; `FilesAPI` class removed (dead code)
 
 ### ProjectInfo Interface Inconsistency
 - **Issue**: `getCurrentProject()` in main.ts returns `{filePath, fileName}` but desktop-api.ts expects `{filePath, projectDir, fileName}`
@@ -1383,13 +1411,18 @@ This section documents features that are partially implemented or have known gap
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| AWS S3 Backend API | ✅ Implemented | `/api/aws/*` endpoints work |
-| AWS S3 Frontend Client | ⚠️ Exists but NOT USED | `awsS3API` class in `aws-api.ts` - never imported |
-| FilesAPI Frontend Client | ❌ Not Working | `filesAPI` class exists but `/files/*` backend endpoints DON'T EXIST |
-| Supabase Database | ⚠️ Partial | `subscriptions` table active; projects/commits tables unused |
-| Cloud Sync (Push) | ❌ Not Implemented | Backend ready, frontend never calls it |
-| Cloud Sync (Pull) | ❌ Not Implemented | Backend ready, frontend never calls it |
+| AWS S3 Backend API | ✅ Implemented | `/api/aws/*` (legacy) + `/api/projects/:id/sync/*` (new project-scoped) |
+| Cloud Sync Service | ✅ Implemented | `cloud-sync-service.ts` orchestrates push/pull via project-scoped endpoints |
+| Cloud Sync (Push) | ✅ Implemented | Uploads unsynced commits + tree.json to S3 with RBAC (editor+) |
+| Cloud Sync (Pull) | ✅ Implemented | Downloads remote tree.json, merges commits, downloads commit files (viewer+) |
+| Cloud Sync UI | ✅ Implemented | Push/Pull buttons, sync status, per-commit cloud indicators in VersionControl |
+| Shared Project Discovery | ✅ Implemented | WelcomePanel "Shared with you" section lists projects via `getUserProjects()` |
+| First-Pull Save Dialog | ✅ Implemented | Native save dialog for choosing download location; path saved in localStorage |
+| Cloud Project Path Mapping | ✅ Implemented | Per-user localStorage links cloud project IDs to local file paths |
+| Shared Project Notifications | ✅ Implemented | Toast notification for newly shared projects on app load |
+| Supabase Database | ✅ Active | `subscriptions`, `projects`, `project_members` tables in use |
 | Project Collaboration | ✅ Implemented | Settings → Project tab: invite members, roles (owner/editor/viewer) |
+| Invite Emails (SES) | ✅ Implemented | Sends email via Amazon SES when a member is invited (requires `INVITE_FROM_EMAIL` env var) |
 
 ### Git Integration
 
@@ -1416,7 +1449,71 @@ This section documents features that are partially implemented or have known gap
 
 ## Recent Updates & Features
 
-### Settings Panel & Project Collaboration (v1.8.0 - Latest)
+### Cloud File Sharing & Sync (v1.11.0 - Latest)
+
+**Project-Scoped Cloud Sync**:
+- New backend endpoints: `POST /api/projects/:id/sync/push-url`, `POST .../pull-url`, `GET .../list`
+- S3 key format: `projects/{projectId}/tree.json` and `projects/{projectId}/commits/{commitId}.3dm`
+- Permission enforcement via `checkProjectPermission()`: editor+ for push, viewer+ for pull/list
+- Rate limiting applied to sync endpoints
+
+**Cloud Sync Service** (`src/lib/cloud-sync-service.ts`):
+- `CloudSyncService` class with `pushCommitFile()`, `pullCommitFile()`, `pushTreeJson()`, `pullTreeJson()`
+- `computeSyncStatus()` compares local vs remote commit sets
+- `downloadLatestSnapshot()` pulls tree.json + latest commit .3dm for first-time project download
+- Thin service pattern: frontend uploads to presigned URL, backend validates permissions
+
+**Cloud Project Path Mapping** (localStorage helpers in `cloud-sync-service.ts`):
+- Per-user localStorage map: `0studio_cloud_paths_{userId}` → `{ [projectId]: localFilePath }`
+- `getLocalPathForProject()` / `setCloudProjectPath()` / `findProjectIdByLocalPath()` for bidirectional lookup
+- `getSeenSharedProjectIds()` / `markProjectAsSeen()` for notification tracking
+- Enables Person B (collaborator) to link their local download path to the cloud project ID
+
+**VersionControlContext Cloud Integration**:
+- New state: `cloudProject`, `cloudSyncedCommitIds`, `cloudSyncStatus`, `isCloudSyncing`
+- New methods: `pushToCloud()`, `pullFromCloud()`, `refreshCloudStatus()`
+- Cloud project detection: first checks localStorage mapping (Person B), then falls back to `getProjectByFilePath()` (Person A)
+- `cloudSyncedCommitIds` persisted in local `tree.json` for tracking pushed commits
+- Pull merges remote commits/branches into local state (additive merge, no conflict resolution)
+
+**Cloud Sync UI** (`VersionControl.tsx`):
+- "Cloud Sync" section shown when project is cloud-enabled
+- Displays sync status: commits to push (amber), commits to pull (blue), up-to-date (green)
+- Push and Pull buttons with loading spinner
+- Per-commit cloud indicator (blue cloud icon) for synced commits
+
+**Shared Project Receiving Flow** (`ModelViewer.tsx` WelcomePanel):
+- "Shared with you" section lists projects where user is a member (not owner) via `projectAPI.getUserProjects()`
+- "Your cloud projects" section lists user's own cloud-registered projects
+- First-time download: native save dialog (`showSaveDialog`) lets user choose local path → downloads latest snapshot from S3 → saves .3dm + tree.json + commit files → opens project
+- Subsequent opens: reuses saved local path from localStorage mapping
+- In-app notification (toast) when new shared projects are detected (tracks seen projects in localStorage)
+
+**Electron Save Dialog** (new IPC):
+- `showSaveDialog` added to `electron/main.ts`, `electron/preload.ts`, `src/lib/desktop-api.ts`
+- Used by shared project download to let user choose save location
+
+**Dead Code Removed**:
+- `FilesAPI` class removed from `aws-api.ts` (was calling non-existent `/files/*` backend endpoints)
+- Associated types (`UploadUrlRequest`, `ModelVersion`, `Model`, etc.) removed
+
+### App-Level Providers & Navigation Persistence (v1.9.0)
+
+**App-level provider tree**:
+- `ModelProvider` and `VersionControlProvider` moved from per-route wrappers to **App.tsx**, wrapping all routes (HashRouter → VersionControlProvider → ModelProvider → TooltipProvider → Routes).
+- **Order**: `VersionControlProvider` must wrap `ModelProvider` (ModelProvider calls `useVersionControl()`). Reversing the order caused a black screen on load.
+
+**Navigation persistence**:
+- After opening a project, navigating to payment (Dashboard or Checkout) and clicking "Back to app" returns the user to the **same open project** (state is no longer lost on route change).
+- Same applies when going to Settings and back: open project is preserved.
+
+**Project settings tab**:
+- Settings page uses the same app-level ModelContext. When the user had a project open before navigating to Settings, the **Project** tab now shows that project (enable collaboration, members, invites). Previously it showed "No project open" because each page had its own fresh ModelProvider.
+
+**Removed**:
+- Per-route provider wrappers removed from Index, Settings, Dashboard, and Checkout. They all consume context from App.
+
+### Settings Panel & Project Collaboration (v1.8.0)
 
 **Settings Page** (`/settings`):
 - New Settings page with Account and Project tabs
@@ -1574,14 +1671,16 @@ This section documents features that are partially implemented or have known gap
 - **State Management**: Proper reset when project is closed
 - **UI**: Checkboxes with disabled state when limit reached
 
-### Cloud Storage Integration (Backend Ready, Frontend NOT Connected)
-- **Supabase**: Database tables exist for projects and commits, but NOT integrated with frontend
-- **AWS S3 Backend**: `/api/aws/*` endpoints implemented and functional (presigned URLs, versioning)
-- **AWS S3 Frontend**: `awsS3API` class exists in `aws-api.ts` but is **NEVER IMPORTED** anywhere
-- **FilesAPI**: `filesAPI` class exists but backend `/files/*` endpoints **DON'T EXIST**
-- **Payment Gating**: Payment status is checked via backend API
-- **Current Status**: All version control is 100% local via `0studio_{filename}/` folder. No cloud features work.
-- **To Enable**: Import `awsS3API` in `VersionControlContext` and wire up push/pull methods
+### Cloud File Sharing (Implemented)
+- **Project-Scoped S3 Sync**: New `/api/projects/:id/sync/*` endpoints with member permission checks
+- **S3 Key Format**: `projects/{projectId}/tree.json` and `projects/{projectId}/commits/{commitId}.3dm`
+- **Push**: Uploads unsynced commit files + tree.json to S3 (requires editor+ role)
+- **Pull**: Downloads remote tree.json, identifies new commits, downloads their .3dm files, merges into local state (requires viewer+ role)
+- **Sync Status**: Tracks `localOnly`, `remoteOnly`, and `synced` commit arrays
+- **UI**: Cloud sync section in VersionControl with Push/Pull buttons, sync status, per-commit cloud indicators
+- **Service**: `cloud-sync-service.ts` orchestrates all cloud operations via presigned URLs
+- **Persistence**: `cloudSyncedCommitIds` persisted in local tree.json for tracking which commits have been pushed
+- **Dead Code Removed**: `FilesAPI` class removed from `aws-api.ts` (was calling non-existent `/files/*` endpoints)
 
 ### Payment System
 - **Stripe Integration**: Full subscription management
@@ -1589,6 +1688,8 @@ This section documents features that are partially implemented or have known gap
 - **Dashboard**: User-friendly plan selection interface
 
 ### Bug Fixes
+- **Provider order / black screen**: With app-level providers, wrong order (ModelProvider wrapping VersionControlProvider) caused `useVersionControl()` to run before provider mounted; fixed by ensuring VersionControlProvider wraps ModelProvider in App.tsx.
+- **Checkout JSX**: Fixed missing closing `</div>` in Checkout.tsx return that caused build/lint error.
 - **Tree.json Persistence**: Fixed race condition where `createInitialCommit` could run before tree.json finished loading—ModelContext now awaits `setCurrentModel(filePath)` before `createInitialCommit`, ensuring branches/commits from `0studio_{filename}/` are loaded when opening (native dialog or recent projects)
 - **Gallery Mode Reset**: Fixed bug where gallery mode background persisted after closing project
 - **Grid Layout**: Fixed 3 and 4 model layouts to display correctly
@@ -1617,6 +1718,7 @@ This section documents features that are partially implemented or have known gap
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key
 - `STRIPE_SECRET_KEY`: Stripe secret key
 - `STRIPE_WEBHOOK_SECRET`: Stripe webhook secret
+- `INVITE_FROM_EMAIL`: (optional) Verified SES sender address for invite emails (e.g., `noreply@yourdomain.com`). If unset, invite emails are silently skipped.
 - `PORT`: Server port (default: 3000)
 - `FRONTEND_URL`: Frontend URL for CORS
 
@@ -1630,10 +1732,15 @@ This section documents features that are partially implemented or have known gap
 2. **Use desktop-api.ts**: For Electron IPC, don't call window.electronAPI directly
 3. **Scene manipulation**: Use ModelContext methods (addPrimitive, transformObject, etc.)
 5. **Cloud operations**: 
-   - Backend API `/api/aws/*` endpoints exist and work
-   - Frontend `awsS3API` class exists but is NEVER IMPORTED or used
-   - Frontend `filesAPI` class exists but backend `/files/*` endpoints DON'T EXIST
-   - To enable cloud sync: import `awsS3API` in `VersionControlContext` and call its methods
+   - Project-scoped sync endpoints: `/api/projects/:id/sync/push-url`, `/pull-url`, `/list`
+   - `cloud-sync-service.ts` orchestrates all push/pull operations
+   - `VersionControlContext` exposes `pushToCloud()`, `pullFromCloud()`, `refreshCloudStatus()`
+   - Push requires editor+ role; Pull/List requires viewer+ role
+   - Legacy `/api/aws/*` endpoints still work for direct S3 operations
+   - `awsS3API` class in `aws-api.ts` still available but cloud sync uses `cloudSyncService`
+   - Cloud project path mapping stored in localStorage (`0studio_cloud_paths_{userId}`)
+   - Person B (collaborator) discovers shared projects in WelcomePanel, chooses save location on first download
+   - `showSaveDialog` IPC available in `desktop-api.ts` for native save dialogs
 6. **Authentication**: Use AuthContext and check user state - works for payment plans
 7. **Payment plans**: 
    - Payment plans managed via Stripe subscriptions stored in Supabase `subscriptions` table
@@ -1644,11 +1751,11 @@ This section documents features that are partially implemented or have known gap
 8. **UI components**: Prefer Shadcn UI from `src/components/ui/`
 9. **Forms**: Use Shadcn Forms pattern
 10. **State management**: Use contexts for global state, useState for local
-11. **Provider dependencies**: 
-    - `ModelProvider` requires `VersionControlProvider` (ModelProvider uses useVersionControl internally)
-    - Always wrap pages with both providers if using ModelProvider
-    - Dashboard and Checkout pages require both providers for TitleBar to work correctly
-    - Checkout page wraps its return statements with providers (not at route level)
+11. **Provider architecture**: 
+    - `ModelProvider` and `VersionControlProvider` live in **App.tsx** and wrap all routes (single tree for the whole app).
+    - **Order is critical**: `VersionControlProvider` must wrap `ModelProvider` (ModelProvider uses `useVersionControl()` internally). Wrong order causes black screen on load.
+    - Index, Dashboard, Checkout, and Settings do **not** wrap with these providers; they consume context from App.
+    - This gives: (1) same open project when returning from payment/settings; (2) Project settings tab sees current project when user had one open.
 12. **UserMenu**: Clicking user email in TitleBar opens dropdown with Settings, Plans & Billing, Sign Out
 13. **Settings & Project API**: Use `projectAPI` from `src/lib/project-api.ts` for project registration, members, invites. Run `PROJECT_MEMBERS_MIGRATION.sql` in Supabase before using. Permission checks: owners can manage members; editors can invite
 14. **Gallery Mode**: 

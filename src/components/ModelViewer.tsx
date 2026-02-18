@@ -7,6 +7,10 @@ import {
   X,
   FolderOpen,
   ChevronRight,
+  Cloud,
+  CloudDownload,
+  Loader2,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useModel, SceneStats, GeneratedObject, LoadedModel } from "@/contexts/ModelContext";
@@ -15,6 +19,9 @@ import { useRecentProjects } from "@/contexts/RecentProjectsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDesktopAPI } from "@/lib/desktop-api";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { projectAPI, CloudProject } from "@/lib/project-api";
+import { cloudSyncService, getLocalPathForProject, setCloudProjectPath, getSeenSharedProjectIds, markProjectAsSeen } from "@/lib/cloud-sync-service";
+import { toast } from "sonner";
 
 /** Shorten path for display - replace /Users/username with ~ */
 function shortenPath(path: string): string {
@@ -48,22 +55,130 @@ function WelcomePanel({
   const isDesktop = desktopAPI.isDesktop;
   const signedIn = !!user;
 
+  const [sharedProjects, setSharedProjects] = useState<CloudProject[]>([]);
+  const [loadingShared, setLoadingShared] = useState(false);
+  const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
+
+  // Fetch shared projects when user is signed in
+  useEffect(() => {
+    if (!signedIn || !user) return;
+
+    let cancelled = false;
+    const fetchShared = async () => {
+      setLoadingShared(true);
+      try {
+        const projects = await projectAPI.getUserProjects();
+        if (!cancelled) {
+          setSharedProjects(projects);
+
+          // Check for new shared projects and show notifications
+          const seen = getSeenSharedProjectIds(user.id);
+          const newProjects = projects.filter(p => !seen.includes(p.id) && p.owner_id !== user.id);
+          for (const proj of newProjects) {
+            toast.info(`"${proj.name}" was shared with you`, {
+              description: 'You can download it from the Shared Projects section.',
+              duration: 6000,
+            });
+            markProjectAsSeen(user.id, proj.id);
+          }
+          // Also mark owned projects as seen
+          for (const proj of projects.filter(p => p.owner_id === user.id)) {
+            markProjectAsSeen(user.id, proj.id);
+          }
+        }
+      } catch {
+        // Silently fail -- user might not have network
+      } finally {
+        if (!cancelled) setLoadingShared(false);
+      }
+    };
+    fetchShared();
+    return () => { cancelled = true; };
+  }, [signedIn, user]);
+
   const handleOpenRecent = async (path: string) => {
     if (isDesktop) {
       await desktopAPI.openProjectByPath(path);
     }
   };
 
+  const handleOpenSharedProject = async (project: CloudProject) => {
+    if (!user || !isDesktop) return;
+
+    // Check if we already have a local path for this project
+    const existingPath = getLocalPathForProject(user.id, project.id);
+    if (existingPath) {
+      try {
+        await desktopAPI.openProjectByPath(existingPath);
+        return;
+      } catch {
+        // File may have been moved/deleted -- fall through to re-download
+      }
+    }
+
+    // First-time pull: show save dialog, then download
+    setDownloadingProjectId(project.id);
+    try {
+      const suggestedName = project.name.endsWith('.3dm') ? project.name : `${project.name}.3dm`;
+      const savePath = await desktopAPI.showSaveDialog({
+        defaultPath: suggestedName,
+        filters: [
+          { name: 'Rhino 3D Models', extensions: ['3dm'] },
+        ],
+      });
+
+      if (!savePath) {
+        // User cancelled the dialog
+        return;
+      }
+
+      toast.loading('Downloading project from cloud...', { id: 'shared-download' });
+
+      const snapshot = await cloudSyncService.downloadLatestSnapshot(project.id);
+      if (!snapshot) {
+        toast.error('No data found in cloud for this project', { id: 'shared-download' });
+        return;
+      }
+
+      // Write the .3dm file to the chosen path
+      await desktopAPI.writeFileBuffer(savePath, snapshot.commitBuffer);
+
+      // Save the commit file in the 0studio storage directory
+      await desktopAPI.saveCommitFile(savePath, snapshot.latestCommitId, snapshot.commitBuffer);
+
+      // Save tree.json with cloud synced IDs
+      const allCommitIds = snapshot.treeData.branches.flatMap(b => b.commits.map(c => c.id));
+      await desktopAPI.saveTreeFile(savePath, {
+        ...snapshot.treeData,
+        cloudSyncedCommitIds: allCommitIds,
+      });
+
+      // Remember this path for future pulls
+      setCloudProjectPath(user.id, project.id, savePath);
+
+      toast.success('Project downloaded successfully', { id: 'shared-download' });
+
+      // Open the downloaded file
+      await desktopAPI.openProjectByPath(savePath);
+    } catch (error: any) {
+      console.error('Error downloading shared project:', error);
+      toast.error(error.message || 'Failed to download project', { id: 'shared-download' });
+    } finally {
+      setDownloadingProjectId(null);
+    }
+  };
+
+  // Split shared projects into owned vs shared-with-me
+  const sharedWithMe = sharedProjects.filter(p => user && p.owner_id !== user.id);
+  const ownedProjects = sharedProjects.filter(p => user && p.owner_id === user.id);
+
   return (
     <div className="absolute inset-0 z-10 flex items-center justify-center">
-      {/* Centered welcome panel - 0studio preview at top, actions below */}
       <div className="flex flex-col items-center gap-8 max-w-md w-full mx-4">
-        {/* 0studio preview / branding */}
         <div className="flex flex-col items-center gap-4">
           <h1 className="text-3xl font-semibold tracking-tight">0studio</h1>
         </div>
 
-        {/* Open project & Recent projects - centered below */}
         <div className="w-full flex flex-col gap-6 bg-background/80 backdrop-blur-xl border border-border/50 rounded-lg shadow-2xl p-6">
           {/* Primary actions */}
           <div className="flex flex-col gap-2">
@@ -130,6 +245,98 @@ function WelcomePanel({
               )}
             </div>
           </div>
+
+          {/* Shared projects */}
+          {signedIn && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5" />
+                  Shared with you
+                </h2>
+                {sharedWithMe.length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {sharedWithMe.length} {sharedWithMe.length === 1 ? "project" : "projects"}
+                  </span>
+                )}
+              </div>
+              <div className="max-h-40 overflow-auto space-y-0.5">
+                {loadingShared ? (
+                  <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground/70">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Loading shared projects...
+                  </div>
+                ) : sharedWithMe.length === 0 ? (
+                  <p className="text-sm text-muted-foreground/70 py-2">
+                    No projects shared with you yet.
+                  </p>
+                ) : (
+                  sharedWithMe.map((project) => {
+                    const localPath = user ? getLocalPathForProject(user.id, project.id) : null;
+                    const isDownloading = downloadingProjectId === project.id;
+
+                    return (
+                      <button
+                        key={project.id}
+                        onClick={() => handleOpenSharedProject(project)}
+                        disabled={!isDesktop || isDownloading}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-left hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
+                      >
+                        <Cloud className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                        <span className="font-medium truncate flex-1 min-w-0">{project.name}</span>
+                        {isDownloading ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground flex-shrink-0" />
+                        ) : localPath ? (
+                          <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+                            {shortenPath(localPath)}
+                          </span>
+                        ) : (
+                          <CloudDownload className="w-4 h-4 text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Your cloud projects (owned) */}
+          {signedIn && ownedProjects.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Cloud className="w-3.5 h-3.5" />
+                  Your cloud projects
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {ownedProjects.length} {ownedProjects.length === 1 ? "project" : "projects"}
+                </span>
+              </div>
+              <div className="max-h-32 overflow-auto space-y-0.5">
+                {ownedProjects.map((project) => {
+                  const localPath = user ? getLocalPathForProject(user.id, project.id) : null;
+                  const displayPath = localPath || project.s3_key;
+                  return (
+                    <button
+                      key={project.id}
+                      onClick={() => handleOpenSharedProject(project)}
+                      disabled={!isDesktop}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-left hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
+                    >
+                      <span className="font-medium truncate flex-1 min-w-0">{project.name}</span>
+                      <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+                        {shortenPath(displayPath)}
+                      </span>
+                      {isDesktop && (
+                        <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

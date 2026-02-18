@@ -219,6 +219,10 @@ class RhinoStudio {
       this.loadTreeFile(filePath));
     ipcMain.handle('validate-commit-files', (_, filePath: string, commitIds: string[]) => 
       this.validateCommitFiles(filePath, commitIds));
+
+    // Save file dialog (for choosing where to save downloaded files)
+    ipcMain.handle('show-save-dialog', (_, options: { defaultPath?: string, filters?: { name: string, extensions: string[] }[] }) => 
+      this.showSaveDialog(options));
   }
 
   private async openProjectDialog(): Promise<string | null> {
@@ -235,6 +239,23 @@ class RhinoStudio {
       const filePath = result.filePaths[0];
       await this.openProject(filePath);
       return filePath;
+    }
+
+    return null;
+  }
+
+  private async showSaveDialog(options: { defaultPath?: string, filters?: { name: string, extensions: string[] }[] }): Promise<string | null> {
+    const result = await dialog.showSaveDialog(this.mainWindow!, {
+      title: 'Choose where to save the file',
+      defaultPath: options.defaultPath,
+      filters: options.filters || [
+        { name: 'Rhino 3D Models', extensions: ['3dm'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+    });
+
+    if (!result.canceled && result.filePath) {
+      return result.filePath;
     }
 
     return null;

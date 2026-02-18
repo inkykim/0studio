@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3, ArrowLeft } from "lucide-react";
+import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3, ArrowLeft, Cloud, CloudUpload, CloudDownload, Loader2, Check } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 
@@ -44,6 +44,7 @@ interface BranchingTreeProps {
   isGalleryMode: boolean;
   selectedCommitIds: Set<string>;
   onToggleSelection: (commitId: string) => void;
+  cloudSyncedCommitIds: Set<string>;
 }
 
 const BranchingTree = ({
@@ -58,6 +59,7 @@ const BranchingTree = ({
   isGalleryMode,
   selectedCommitIds,
   onToggleSelection,
+  cloudSyncedCommitIds,
 }: BranchingTreeProps) => {
   // Build tree layout
   const { nodes, connections, maxX } = useMemo(() => {
@@ -339,6 +341,9 @@ const BranchingTree = ({
                         {node.branch.name}
                       </Badge>
                     )}
+                    {cloudSyncedCommitIds.has(node.commit.id) && (
+                      <Cloud className="w-3 h-3 text-blue-400 shrink-0" title="Synced to cloud" />
+                    )}
                     <span className="text-code text-xs text-muted-foreground shrink-0">
                       {versionLabel}
                     </span>
@@ -396,6 +401,13 @@ export const VersionControl = () => {
     toggleGalleryMode,
     toggleCommitSelection,
     clearSelectedCommits,
+    cloudProject,
+    cloudSyncedCommitIds,
+    cloudSyncStatus,
+    isCloudSyncing,
+    pushToCloud,
+    pullFromCloud,
+    refreshCloudStatus,
   } = useVersionControl();
   
   const [commitMessage, setCommitMessage] = useState("");
@@ -556,6 +568,66 @@ export const VersionControl = () => {
             </section>
           )}
 
+          {/* Cloud Sync */}
+          {cloudProject && (
+            <section>
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+                Cloud Sync
+              </h3>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Cloud className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="truncate">{cloudProject.name}</span>
+                </div>
+                {cloudSyncStatus && (
+                  <div className="flex items-center gap-3 text-xs">
+                    {cloudSyncStatus.localOnly.length > 0 && (
+                      <span className="text-amber-500">{cloudSyncStatus.localOnly.length} to push</span>
+                    )}
+                    {cloudSyncStatus.remoteOnly.length > 0 && (
+                      <span className="text-blue-400">{cloudSyncStatus.remoteOnly.length} to pull</span>
+                    )}
+                    {cloudSyncStatus.localOnly.length === 0 && cloudSyncStatus.remoteOnly.length === 0 && (
+                      <span className="text-green-500 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Up to date
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={pushToCloud}
+                    disabled={isCloudSyncing}
+                    className="flex-1 gap-1.5 h-8 text-xs"
+                  >
+                    {isCloudSyncing ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CloudUpload className="w-3.5 h-3.5" />
+                    )}
+                    Push
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={pullFromCloud}
+                    disabled={isCloudSyncing}
+                    className="flex-1 gap-1.5 h-8 text-xs"
+                  >
+                    {isCloudSyncing ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CloudDownload className="w-3.5 h-3.5" />
+                    )}
+                    Pull
+                  </Button>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* Version History */}
           <section>
             <div className="flex items-center justify-between mb-3">
@@ -626,6 +698,7 @@ export const VersionControl = () => {
                 isGalleryMode={isGalleryMode}
                 selectedCommitIds={selectedCommitIds}
                 onToggleSelection={toggleCommitSelection}
+                cloudSyncedCommitIds={cloudSyncedCommitIds}
               />
             )}
           </section>

@@ -70,6 +70,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       validateCommitFiles: (filePath: string, commitIds: string[]) => 
         ipcRenderer.invoke('validate-commit-files', filePath, commitIds),
 
+      // Save dialog
+      showSaveDialog: (options: { defaultPath?: string, filters?: { name: string, extensions: string[] }[] }) =>
+        ipcRenderer.invoke('show-save-dialog', options),
+
       // Event listeners
   onProjectOpened: (callback: (project: ProjectInfo) => void) => {
     ipcRenderer.on('project-opened', (_, project) => callback(project));
@@ -128,6 +132,7 @@ declare global {
       saveTreeFile: (filePath: string, treeData: any) => Promise<void>;
       loadTreeFile: (filePath: string) => Promise<any>;
       validateCommitFiles: (filePath: string, commitIds: string[]) => Promise<string[]>;
+      showSaveDialog: (options: { defaultPath?: string, filters?: { name: string, extensions: string[] }[] }) => Promise<string | null>;
       
       onProjectOpened: (callback: (project: ProjectInfo) => void) => void;
       onProjectClosed: (callback: () => void) => void;
