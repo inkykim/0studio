@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectVersionsCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectVersionsCommand, DeleteObjectCommand, PutBucketCorsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { createClient } from '@supabase/supabase-js';
@@ -41,6 +41,32 @@ const s3Client = new S3Client({
 });
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME;
+
+// Ensure S3 bucket has CORS configured for presigned URL access from the browser
+async function ensureS3Cors() {
+  if (!BUCKET_NAME) return;
+  try {
+    const command = new PutBucketCorsCommand({
+      Bucket: BUCKET_NAME,
+      CORSConfiguration: {
+        CORSRules: [
+          {
+            AllowedHeaders: ['*'],
+            AllowedMethods: ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
+            AllowedOrigins: ['*'],
+            ExposeHeaders: ['ETag', 'x-amz-version-id'],
+            MaxAgeSeconds: 3600,
+          },
+        ],
+      },
+    });
+    await s3Client.send(command);
+    console.log('✅ S3 bucket CORS configured for', BUCKET_NAME);
+  } catch (err) {
+    console.error('⚠️ Failed to set S3 CORS (presigned URL uploads may fail in browser):', err.message);
+  }
+}
+ensureS3Cors();
 
 // SES client for invite emails (uses same AWS creds as S3)
 const sesClient = new SESClient({
@@ -131,6 +157,32 @@ async function verifyAuth(req, res, next) {
   } catch (error) {
     console.error('Auth verification error:', error);
     res.status(401).json({ error: 'Authentication failed' });
+  }
+}
+
+// Resolve any pending project invites for a newly-authenticated user.
+// When someone is invited by email before they have an account, the
+// project_members row has user_id=null and status='pending'.  Once they
+// sign in we can link their account and activate the membership.
+async function resolvePendingInvites(user) {
+  if (!user?.email) return;
+  try {
+    const { data: pending } = await supabase
+      .from('project_members')
+      .select('id')
+      .eq('email', user.email.toLowerCase())
+      .is('user_id', null);
+
+    if (pending && pending.length > 0) {
+      const ids = pending.map(r => r.id);
+      await supabase
+        .from('project_members')
+        .update({ user_id: user.id, status: 'active', updated_at: new Date().toISOString() })
+        .in('id', ids);
+      console.log(`✅ Resolved ${ids.length} pending invite(s) for ${user.email}`);
+    }
+  } catch (err) {
+    console.error('Error resolving pending invites:', err);
   }
 }
 
@@ -359,6 +411,9 @@ app.post('/api/projects', verifyAuth, async (req, res) => {
 // Get projects the user owns or is a member of
 app.get('/api/projects/user-projects', verifyAuth, async (req, res) => {
   try {
+    // Resolve any pending invites so shared projects show up immediately
+    await resolvePendingInvites(req.user);
+
     // Get projects user owns
     const { data: ownedProjects, error: ownedError } = await supabase
       .from('projects')
@@ -371,11 +426,15 @@ app.get('/api/projects/user-projects', verifyAuth, async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch projects' });
     }
 
-    // Get projects user is a member of (not owner)
+    // Get projects user is a member of (by user_id or email)
+    const memberFilters = [`user_id.eq.${req.user.id}`];
+    if (req.user.email) {
+      memberFilters.push(`email.eq.${req.user.email.toLowerCase()}`);
+    }
     const { data: memberships, error: memberError } = await supabase
       .from('project_members')
       .select('project_id')
-      .eq('user_id', req.user.id)
+      .or(memberFilters.join(','))
       .eq('status', 'active')
       .neq('role', 'owner');
 
@@ -386,7 +445,7 @@ app.get('/api/projects/user-projects', verifyAuth, async (req, res) => {
 
     let memberProjects = [];
     if (memberships && memberships.length > 0) {
-      const projectIds = memberships.map(m => m.project_id);
+      const projectIds = [...new Set(memberships.map(m => m.project_id))];
       const { data: projects, error: projError } = await supabase
         .from('projects')
         .select('*')
@@ -462,7 +521,7 @@ app.get('/api/projects/by-path', verifyAuth, async (req, res) => {
 });
 
 // Helper: check if user has specific role or higher on a project
-async function checkProjectPermission(projectId, userId, minRole = 'viewer') {
+async function checkProjectPermission(projectId, userId, minRole = 'viewer', userEmail = null) {
   const roleHierarchy = { owner: 3, editor: 2, viewer: 1 };
 
   // Check if user is project owner
@@ -476,14 +535,28 @@ async function checkProjectPermission(projectId, userId, minRole = 'viewer') {
     return { allowed: true, role: 'owner' };
   }
 
-  // Check project_members table
-  const { data: membership } = await supabase
+  // Check project_members table by user_id
+  let membership = null;
+  const { data: byId } = await supabase
     .from('project_members')
     .select('role')
     .eq('project_id', projectId)
     .eq('user_id', userId)
     .eq('status', 'active')
     .single();
+  membership = byId;
+
+  // Fallback: check by email (covers invites resolved mid-session)
+  if (!membership && userEmail) {
+    const { data: byEmail } = await supabase
+      .from('project_members')
+      .select('role')
+      .eq('project_id', projectId)
+      .eq('email', userEmail.toLowerCase())
+      .eq('status', 'active')
+      .single();
+    membership = byEmail;
+  }
 
   if (!membership) {
     return { allowed: false, role: null };
@@ -545,7 +618,7 @@ app.get('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
     const { projectId } = req.params;
 
     // Check user has at least viewer access
-    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer');
+    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer', req.user.email);
     if (!permission.allowed) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -584,7 +657,7 @@ app.post('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
     }
 
     // Check user has owner or editor access to invite
-    const permission = await checkProjectPermission(projectId, req.user.id, 'editor');
+    const permission = await checkProjectPermission(projectId, req.user.id, 'editor', req.user.email);
     if (!permission.allowed) {
       return res.status(403).json({ error: 'You need editor or owner access to invite members' });
     }
@@ -671,7 +744,7 @@ app.put('/api/projects/:projectId/members/:memberId/role', verifyAuth, async (re
     }
 
     // Check user has owner access to change roles
-    const permission = await checkProjectPermission(projectId, req.user.id, 'owner');
+    const permission = await checkProjectPermission(projectId, req.user.id, 'owner', req.user.email);
     if (!permission.allowed) {
       return res.status(403).json({ error: 'Only project owners can change member roles' });
     }
@@ -722,7 +795,7 @@ app.delete('/api/projects/:projectId/members/:memberId', verifyAuth, async (req,
     const { projectId, memberId } = req.params;
 
     // Check user has owner access
-    const permission = await checkProjectPermission(projectId, req.user.id, 'owner');
+    const permission = await checkProjectPermission(projectId, req.user.id, 'owner', req.user.email);
     if (!permission.allowed) {
       return res.status(403).json({ error: 'Only project owners can remove members' });
     }
@@ -783,7 +856,7 @@ app.post('/api/projects/:projectId/sync/push-url', verifyAuth, async (req, res) 
       return res.status(400).json({ error: 'Missing file_key parameter' });
     }
 
-    const permission = await checkProjectPermission(projectId, req.user.id, 'editor');
+    const permission = await checkProjectPermission(projectId, req.user.id, 'editor', req.user.email);
     if (!permission.allowed) {
       return res.status(403).json({ error: 'You need editor or owner access to push files' });
     }
@@ -814,7 +887,7 @@ app.post('/api/projects/:projectId/sync/pull-url', verifyAuth, async (req, res) 
       return res.status(400).json({ error: 'Missing file_key parameter' });
     }
 
-    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer');
+    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer', req.user.email);
     if (!permission.allowed) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -845,7 +918,7 @@ app.get('/api/projects/:projectId/sync/list', verifyAuth, async (req, res) => {
   try {
     const { projectId } = req.params;
 
-    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer');
+    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer', req.user.email);
     if (!permission.allowed) {
       return res.status(403).json({ error: 'Access denied' });
     }
