@@ -31,6 +31,8 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     saveTreeFile: (filePath, treeData) => electron_1.ipcRenderer.invoke('save-tree-file', filePath, treeData),
     loadTreeFile: (filePath) => electron_1.ipcRenderer.invoke('load-tree-file', filePath),
     validateCommitFiles: (filePath, commitIds) => electron_1.ipcRenderer.invoke('validate-commit-files', filePath, commitIds),
+    // Save dialog
+    showSaveDialog: (options) => electron_1.ipcRenderer.invoke('show-save-dialog', options),
     // Event listeners
     onProjectOpened: (callback) => {
         electron_1.ipcRenderer.on('project-opened', (_, project) => callback(project));

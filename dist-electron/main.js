@@ -194,6 +194,8 @@ class RhinoStudio {
         ipcMain.handle('save-tree-file', (_, filePath, treeData) => this.saveTreeFile(filePath, treeData));
         ipcMain.handle('load-tree-file', (_, filePath) => this.loadTreeFile(filePath));
         ipcMain.handle('validate-commit-files', (_, filePath, commitIds) => this.validateCommitFiles(filePath, commitIds));
+        // Save file dialog (for choosing where to save downloaded files)
+        ipcMain.handle('show-save-dialog', (_, options) => this.showSaveDialog(options));
     }
     async openProjectDialog() {
         const result = await dialog.showOpenDialog(this.mainWindow, {
@@ -208,6 +210,20 @@ class RhinoStudio {
             const filePath = result.filePaths[0];
             await this.openProject(filePath);
             return filePath;
+        }
+        return null;
+    }
+    async showSaveDialog(options) {
+        const result = await dialog.showSaveDialog(this.mainWindow, {
+            title: 'Choose where to save the file',
+            defaultPath: options.defaultPath,
+            filters: options.filters || [
+                { name: 'Rhino 3D Models', extensions: ['3dm'] },
+                { name: 'All Files', extensions: ['*'] }
+            ],
+        });
+        if (!result.canceled && result.filePath) {
+            return result.filePath;
         }
         return null;
     }
