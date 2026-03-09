@@ -147,7 +147,7 @@ function WelcomePanel({
       await desktopAPI.saveCommitFile(savePath, snapshot.latestCommitId, snapshot.commitBuffer);
 
       // Save tree.json with cloud synced IDs
-      const allCommitIds = snapshot.treeData.branches.flatMap(b => b.commits.map(c => c.id));
+      const allCommitIds = snapshot.treeData.commits.map(c => c.id);
       await desktopAPI.saveTreeFile(savePath, {
         ...snapshot.treeData,
         cloudSyncedCommitIds: allCommitIds,

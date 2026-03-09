@@ -281,10 +281,9 @@ class CloudSyncService {
 
     // Find the latest commit on the active branch
     const activeBranch = treeData.branches.find(b => b.id === treeData.activeBranchId);
-    if (!activeBranch) return null;
+    if (!activeBranch?.headCommitId) return null;
 
-    const latestCommitId = activeBranch.commits[activeBranch.commits.length - 1]?.id;
-    if (!latestCommitId) return null;
+    const latestCommitId = activeBranch.headCommitId;
 
     const commitBuffer = await this.pullCommitFile(projectId, latestCommitId);
     return { treeData, latestCommitId, commitBuffer };
