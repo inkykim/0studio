@@ -73,11 +73,13 @@ export class PresenceService {
   }
 
   async updateCommit(commitId: string | null) {
+    if (!this.channel) return;
     this.myState = { ...this.myState, currentCommitId: commitId };
     await this._track();
   }
 
   async updateStatus(statusMessage: string) {
+    if (!this.channel) return;
     this.myState = { ...this.myState, statusMessage };
     await this._track();
   }
@@ -88,6 +90,7 @@ export class PresenceService {
       this.supabase.removeChannel(this.channel);
       this.channel = null;
       this.projectId = null;
+      this.onChange = null;
     }
   }
 
