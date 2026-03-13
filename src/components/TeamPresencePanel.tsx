@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { usePresence } from '@/contexts/PresenceContext';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -17,9 +18,13 @@ export function TeamPresencePanel() {
 
   async function handleSetStatus() {
     const trimmed = draft.trim();
-    await updatePresenceStatus(trimmed);
-    setSaved(trimmed);
-    setDraft('');
+    try {
+      await updatePresenceStatus(trimmed);
+      setSaved(trimmed);
+      setDraft('');
+    } catch {
+      toast.error('Failed to update status');
+    }
   }
 
   return (
