@@ -1,5 +1,7 @@
 # Presence Simulation Dashboard
 
+**Implemented:** 2026-03-13
+
 ## Overview
 
 A dev-only browser-based tool that spawns up to 20 fake presence users on real Supabase Realtime channels. Enables the team to visually test the Team Presence feature under realistic multi-user conditions without needing additional accounts.

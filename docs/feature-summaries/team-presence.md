@@ -1,5 +1,7 @@
 # Team Presence (Sharing Live Display)
 
+**Implemented:** 2026-03-13
+
 ## Overview
 
 Real-time awareness of who is viewing or editing a shared 3D model project. When multiple team members are connected to the same cloud project, they see a live roster of online members and colored avatar indicators on commit nodes.
