@@ -21,8 +21,8 @@ const App = () => (
     <AuthProvider>
       <RecentProjectsProvider>
         <HashRouter>
-          <VersionControlProvider>
-            <PresenceProvider>
+          <PresenceProvider>
+            <VersionControlProvider>
               <ModelProvider>
                 <TooltipProvider>
                   <Toaster />
@@ -36,8 +36,8 @@ const App = () => (
                   </Routes>
                 </TooltipProvider>
               </ModelProvider>
-            </PresenceProvider>
-          </VersionControlProvider>
+            </VersionControlProvider>
+          </PresenceProvider>
         </HashRouter>
       </RecentProjectsProvider>
     </AuthProvider>

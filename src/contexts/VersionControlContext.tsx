@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { cloudSyncService, type RemoteTreeData, type SyncStatus, findProjectIdByLocalPath, setCloudProjectPath } from "@/lib/cloud-sync-service";
 import { projectAPI, type CloudProject } from "@/lib/project-api";
 import { supabase } from "@/lib/supabase";
+import { usePresence } from '@/contexts/PresenceContext';
 
 interface ModelCommit {
   id: string;
@@ -116,6 +117,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<SyncStatus | null>(null);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const cloudSyncedCommitIdsRef = useRef<Set<string>>(new Set());
+
+  const { joinProject, leaveProject, updatePresenceCommit } = usePresence();
 
   const setModelRestoreCallback = useCallback((callback: (modelData: LoadedModel) => void) => {
     setOnModelRestore(() => callback);
@@ -354,6 +357,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         setCommits(treeData.commits);
         setActiveBranchId(treeData.activeBranchId);
         setCurrentCommitId(treeData.currentCommitId);
+        updatePresenceCommit(treeData.currentCommitId);
         setIsLoadingTree(false);
 
         // Detect cloud project in background (don't block loading)
@@ -417,6 +421,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         const latestCommit = persistedCommits[0];
         if (latestCommit) {
           setCurrentCommitId(latestCommit.id);
+          updatePresenceCommit(latestCommit.id);
         }
       }
       
@@ -513,6 +518,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     };
     
     setCurrentCommitId(initialCommit.id);
+    updatePresenceCommit(initialCommit.id);
     console.log("Created initial commit:", initialCommit.id, fileBuffer ? `with ${fileBuffer.byteLength} byte file buffer` : 'without file buffer');
     
     const updatedCommits = [initialCommit];
@@ -742,6 +748,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
       
       setCurrentCommitId(newCommit.id);
+      updatePresenceCommit(newCommit.id);
       setHasUnsavedChanges(false);
       setPulledCommitId(null); // Clear pulled commit after successful commit
 
@@ -836,6 +843,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
 
       setCurrentCommitId(commitId);
+      updatePresenceCommit(commitId);
       setHasUnsavedChanges(false);
 
       return true;
@@ -935,6 +943,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
 
       setCurrentCommitId(commitId);
+      updatePresenceCommit(commitId);
       setPulledCommitId(commitId); // Track which commit was pulled for highlighting
       setHasUnsavedChanges(false);
       
@@ -992,6 +1001,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setModelName(null);
     setCommits([]);
     setCurrentCommitId(null);
+    updatePresenceCommit(null);
     setHasUnsavedChanges(false);
     // Reset gallery mode when closing project
     setIsGalleryMode(false);
@@ -1118,8 +1128,9 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     
     setActiveBranchId(branchId);
     setCurrentCommitId(branch.headCommitId);
+    updatePresenceCommit(branch.headCommitId);
     setPulledCommitId(null);
-    
+
     console.log(`Switched to branch: ${branch.name}`);
   }, [branches, activeBranchId]);
 
@@ -1494,6 +1505,16 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       return;
     }
   }, [currentModel]);
+
+  // Join/leave presence channel when cloudProject changes
+  useEffect(() => {
+    if (cloudProject?.id) {
+      joinProject(cloudProject.id);
+    } else {
+      leaveProject();
+    }
+    return () => leaveProject();
+  }, [cloudProject?.id]);
 
   const value: VersionControlContextType = {
     currentModel,
