@@ -32,7 +32,10 @@ export class SimChannelManager {
     });
 
     return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`Timeout subscribing ${user.displayName}`)), 10000);
+      const timeout = setTimeout(() => {
+        this.supabase.removeChannel(channel);
+        reject(new Error(`Timeout subscribing ${user.displayName}`));
+      }, 10000);
 
       channel
         .on('presence', { event: 'sync' }, () => {})
