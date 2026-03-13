@@ -195,14 +195,16 @@ function validateS3Key(s3Key, userId) {
   }
 }
 
-// Rate limiting
+// Rate limiting — global for all API routes
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: 'Too many requests from this IP, please try again later.',
+  // req.path is relative to mount point, so use originalUrl for absolute path
+  skip: (req) => req.originalUrl === '/api/stripe/webhook',
 });
 
-app.use('/api/aws', limiter);
+app.use('/api', limiter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -843,8 +845,6 @@ app.delete('/api/projects/:projectId/members/:memberId', verifyAuth, async (req,
 // Cloud file sharing: project-scoped S3 operations with member permission checks
 // S3 key format: projects/{projectId}/commits/{commitId}.3dm
 //                projects/{projectId}/tree.json
-
-app.use('/api/projects/:projectId/sync', limiter);
 
 // Get a presigned upload URL for a project file
 app.post('/api/projects/:projectId/sync/push-url', verifyAuth, async (req, res) => {

@@ -12,23 +12,6 @@ export interface FileChangeEvent {
   filePath: string;
 }
 
-export interface GitStatus {
-  files: Array<{
-    path: string;
-    status: string;
-  }>;
-  branch: string;
-  ahead: number;
-  behind: number;
-}
-
-export interface GitCommit {
-  hash: string;
-  message: string;
-  author: string;
-  date: string;
-}
-
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -37,15 +20,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openProjectByPath: (filePath: string) => ipcRenderer.invoke('open-project-by-path', filePath),
   getCurrentProject: () => ipcRenderer.invoke('get-current-project'),
   closeProject: () => ipcRenderer.invoke('close-project'),
-
-  // Version control
-  gitInit: (projectPath: string) => ipcRenderer.invoke('git-init', projectPath),
-  gitStatus: () => ipcRenderer.invoke('git-status'),
-  gitCommit: (message: string, files: string[]) => ipcRenderer.invoke('git-commit', message, files),
-  gitPush: () => ipcRenderer.invoke('git-push'),
-  gitPull: () => ipcRenderer.invoke('git-pull'),
-  gitLog: () => ipcRenderer.invoke('git-log'),
-  gitCheckout: (commitHash: string) => ipcRenderer.invoke('git-checkout', commitHash),
 
   // File watching
   startFileWatching: () => ipcRenderer.invoke('start-file-watching'),
@@ -76,29 +50,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
       // Event listeners
   onProjectOpened: (callback: (project: ProjectInfo) => void) => {
-    ipcRenderer.on('project-opened', (_, project) => callback(project));
-  },
-  
-  onProjectClosed: (callback: () => void) => {
-    ipcRenderer.on('project-closed', callback);
-  },
-  
-  onFileChanged: (callback: (event: FileChangeEvent) => void) => {
-    ipcRenderer.on('file-changed', (_, event) => callback(event));
-  },
-  
-  onShowCommitDialog: (callback: () => void) => {
-    ipcRenderer.on('show-commit-dialog', callback);
-  },
-  
-  onGitOperationComplete: (callback: (operation: string) => void) => {
-    ipcRenderer.on('git-operation-complete', (_, operation) => callback(operation));
+    const handler = (_: any, project: ProjectInfo) => callback(project);
+    ipcRenderer.on('project-opened', handler);
+    return () => ipcRenderer.removeListener('project-opened', handler);
   },
 
-  // Remove listeners
-  removeAllListeners: (channel: string) => {
-    ipcRenderer.removeAllListeners(channel);
-  }
+  onProjectClosed: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('project-closed', handler);
+    return () => ipcRenderer.removeListener('project-closed', handler);
+  },
+
+  onFileChanged: (callback: (event: FileChangeEvent) => void) => {
+    const handler = (_: any, event: FileChangeEvent) => callback(event);
+    ipcRenderer.on('file-changed', handler);
+    return () => ipcRenderer.removeListener('file-changed', handler);
+  },
+
+  onShowCommitDialog: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('show-commit-dialog', handler);
+    return () => ipcRenderer.removeListener('show-commit-dialog', handler);
+  },
+
+  onGitOperationComplete: (callback: (operation: string) => void) => {
+    const handler = (_: any, operation: string) => callback(operation);
+    ipcRenderer.on('git-operation-complete', handler);
+    return () => ipcRenderer.removeListener('git-operation-complete', handler);
+  },
 });
 
 // Type definitions for TypeScript
@@ -109,15 +88,7 @@ declare global {
       openProjectByPath: (filePath: string) => Promise<void>;
       getCurrentProject: () => Promise<ProjectInfo | null>;
       closeProject: () => Promise<void>;
-      
-      gitInit: (projectPath: string) => Promise<void>;
-      gitStatus: () => Promise<GitStatus>;
-      gitCommit: (message: string, files: string[]) => Promise<void>;
-      gitPush: () => Promise<void>;
-      gitPull: () => Promise<void>;
-      gitLog: () => Promise<GitCommit[]>;
-      gitCheckout: (commitHash: string) => Promise<void>;
-      
+
       startFileWatching: () => Promise<void>;
       stopFileWatching: () => Promise<void>;
       setCurrentFile: (filePath: string) => Promise<void>;
@@ -134,12 +105,11 @@ declare global {
       validateCommitFiles: (filePath: string, commitIds: string[]) => Promise<string[]>;
       showSaveDialog: (options: { defaultPath?: string, filters?: { name: string, extensions: string[] }[] }) => Promise<string | null>;
       
-      onProjectOpened: (callback: (project: ProjectInfo) => void) => void;
-      onProjectClosed: (callback: () => void) => void;
-      onFileChanged: (callback: (event: FileChangeEvent) => void) => void;
-      onShowCommitDialog: (callback: () => void) => void;
-      onGitOperationComplete: (callback: (operation: string) => void) => void;
-      removeAllListeners: (channel: string) => void;
+      onProjectOpened: (callback: (project: ProjectInfo) => void) => () => void;
+      onProjectClosed: (callback: () => void) => () => void;
+      onFileChanged: (callback: (event: FileChangeEvent) => void) => () => void;
+      onShowCommitDialog: (callback: () => void) => () => void;
+      onGitOperationComplete: (callback: (operation: string) => void) => () => void;
     };
   }
 }

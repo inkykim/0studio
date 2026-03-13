@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
-import { join, dirname, basename } from 'path';
+import { join, dirname, basename, resolve } from 'path';
 import { existsSync, mkdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { FileWatcherService } from './services/file-watcher.js';
@@ -327,17 +327,33 @@ class RhinoStudio {
     this.currentProjectFile = filePath;
   }
 
+  private validateProjectPath(filePath: string): void {
+    if (!this.currentProjectFile) {
+      throw new Error('No project is currently open');
+    }
+    const projectDir = dirname(this.currentProjectFile);
+    const resolvedPath = resolve(filePath);
+    const resolvedProjectDir = resolve(projectDir);
+
+    // Allow the project file itself, or any path within the project directory
+    if (resolvedPath !== resolve(this.currentProjectFile) &&
+        !resolvedPath.startsWith(resolvedProjectDir + '/')) {
+      throw new Error(`Path "${filePath}" is outside the project directory`);
+    }
+  }
+
   private async readFileBuffer(filePath: string): Promise<ArrayBuffer> {
+    this.validateProjectPath(filePath);
     const fs = await import('fs/promises');
     const buffer = await fs.readFile(filePath);
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
   }
 
   private async writeFileBuffer(filePath: string, buffer: ArrayBuffer): Promise<void> {
+    this.validateProjectPath(filePath);
     const fsPromises = await import('fs/promises');
     const nodeBuffer = Buffer.from(buffer);
     await fsPromises.writeFile(filePath, nodeBuffer);
-    console.log(`File written to: ${filePath}`);
   }
 
   // File storage methods for 0studio commit storage

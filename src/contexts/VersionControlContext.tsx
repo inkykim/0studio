@@ -617,11 +617,11 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     };
 
     // Set up file change listener
-    desktopAPI.onFileChanged(handleFileChange);
+    const unsubFileChanged = desktopAPI.onFileChanged(handleFileChange);
 
     // Cleanup
     return () => {
-      desktopAPI.removeAllListeners('file-changed');
+      unsubFileChanged?.();
     };
   }, [currentModel]); // Re-setup when current model changes
 
@@ -1030,11 +1030,11 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     };
 
     // Set up project closed listener
-    desktopAPI.onProjectClosed(handleProjectClosed);
+    const unsubProjectClosed = desktopAPI.onProjectClosed(handleProjectClosed);
 
     // Cleanup
     return () => {
-      desktopAPI.removeAllListeners('project-closed');
+      unsubProjectClosed?.();
     };
   }, [clearCurrentModel]);
 

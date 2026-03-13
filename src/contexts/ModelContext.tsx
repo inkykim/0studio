@@ -214,11 +214,11 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    desktopAPI.onProjectOpened(handleProjectOpened);
+    const unsubProjectOpened = desktopAPI.onProjectOpened(handleProjectOpened);
 
     // Cleanup
     return () => {
-      desktopAPI.removeAllListeners('project-opened');
+      unsubProjectOpened?.();
     };
   }, [createInitialCommit, addRecentProject, setCurrentModel]);
 
@@ -240,11 +240,11 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     };
 
     // Set up file change listener
-    desktopAPI.onFileChanged(handleFileChange);
+    const unsubFileChanged = desktopAPI.onFileChanged(handleFileChange);
 
     // Cleanup
     return () => {
-      desktopAPI.removeAllListeners('file-changed');
+      unsubFileChanged?.();
     };
   }, [currentFile]); // Re-setup when current file changes
 
