@@ -9,14 +9,6 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     openProjectByPath: (filePath) => electron_1.ipcRenderer.invoke('open-project-by-path', filePath),
     getCurrentProject: () => electron_1.ipcRenderer.invoke('get-current-project'),
     closeProject: () => electron_1.ipcRenderer.invoke('close-project'),
-    // Version control
-    gitInit: (projectPath) => electron_1.ipcRenderer.invoke('git-init', projectPath),
-    gitStatus: () => electron_1.ipcRenderer.invoke('git-status'),
-    gitCommit: (message, files) => electron_1.ipcRenderer.invoke('git-commit', message, files),
-    gitPush: () => electron_1.ipcRenderer.invoke('git-push'),
-    gitPull: () => electron_1.ipcRenderer.invoke('git-pull'),
-    gitLog: () => electron_1.ipcRenderer.invoke('git-log'),
-    gitCheckout: (commitHash) => electron_1.ipcRenderer.invoke('git-checkout', commitHash),
     // File watching
     startFileWatching: () => electron_1.ipcRenderer.invoke('start-file-watching'),
     stopFileWatching: () => electron_1.ipcRenderer.invoke('stop-file-watching'),
@@ -35,22 +27,28 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     showSaveDialog: (options) => electron_1.ipcRenderer.invoke('show-save-dialog', options),
     // Event listeners
     onProjectOpened: (callback) => {
-        electron_1.ipcRenderer.on('project-opened', (_, project) => callback(project));
+        const handler = (_, project) => callback(project);
+        electron_1.ipcRenderer.on('project-opened', handler);
+        return () => electron_1.ipcRenderer.removeListener('project-opened', handler);
     },
     onProjectClosed: (callback) => {
-        electron_1.ipcRenderer.on('project-closed', callback);
+        const handler = () => callback();
+        electron_1.ipcRenderer.on('project-closed', handler);
+        return () => electron_1.ipcRenderer.removeListener('project-closed', handler);
     },
     onFileChanged: (callback) => {
-        electron_1.ipcRenderer.on('file-changed', (_, event) => callback(event));
+        const handler = (_, event) => callback(event);
+        electron_1.ipcRenderer.on('file-changed', handler);
+        return () => electron_1.ipcRenderer.removeListener('file-changed', handler);
     },
     onShowCommitDialog: (callback) => {
-        electron_1.ipcRenderer.on('show-commit-dialog', callback);
+        const handler = () => callback();
+        electron_1.ipcRenderer.on('show-commit-dialog', handler);
+        return () => electron_1.ipcRenderer.removeListener('show-commit-dialog', handler);
     },
     onGitOperationComplete: (callback) => {
-        electron_1.ipcRenderer.on('git-operation-complete', (_, operation) => callback(operation));
+        const handler = (_, operation) => callback(operation);
+        electron_1.ipcRenderer.on('git-operation-complete', handler);
+        return () => electron_1.ipcRenderer.removeListener('git-operation-complete', handler);
     },
-    // Remove listeners
-    removeAllListeners: (channel) => {
-        electron_1.ipcRenderer.removeAllListeners(channel);
-    }
 });
