@@ -11,12 +11,12 @@ export interface PresenceUser {
 }
 
 // 8 distinct colors for team member avatars
-const PRESENCE_COLORS = [
+export const PRESENCE_COLORS = [
   '#6366f1', '#ec4899', '#f59e0b', '#10b981',
   '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6',
 ];
 
-function colorForUser(userId: string): string {
+export function colorForUser(userId: string): string {
   let hash = 0;
   for (let i = 0; i < userId.length; i++) {
     hash = userId.charCodeAt(i) + ((hash << 5) - hash);
