@@ -365,6 +365,9 @@ function ProjectSettings() {
               </Badge>
             )}
           </div>
+          {cloudProject && (
+            <p className="text-xs text-muted-foreground mt-2 font-mono select-all">Project ID: {cloudProject.id}</p>
+          )}
         </div>
       </div>
 
