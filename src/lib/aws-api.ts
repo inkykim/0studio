@@ -129,7 +129,6 @@ export class AWSS3API {
         etag,
       };
     } catch (error) {
-      console.error('Error uploading file:', error);
       throw error;
     }
   }
@@ -148,7 +147,6 @@ export class AWSS3API {
 
       return await response.arrayBuffer();
     } catch (error) {
-      console.error('Error downloading file:', error);
       throw error;
     }
   }

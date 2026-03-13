@@ -40,7 +40,6 @@ export class ProjectAPI {
 
       return await response.json();
     } catch (error) {
-      console.error('Error registering project:', error);
       throw error;
     }
   }
@@ -63,7 +62,6 @@ export class ProjectAPI {
       const data = await response.json();
       return data.projects;
     } catch (error) {
-      console.error('Error fetching user projects:', error);
       throw error;
     }
   }
@@ -89,8 +87,7 @@ export class ProjectAPI {
       }
 
       return await response.json();
-    } catch (error) {
-      console.error('Error fetching project by path:', error);
+    } catch {
       return null;
     }
   }
@@ -115,7 +112,6 @@ export class ProjectAPI {
       const data = await response.json();
       return data.members;
     } catch (error) {
-      console.error('Error fetching project members:', error);
       throw error;
     }
   }
@@ -145,7 +141,6 @@ export class ProjectAPI {
       toast.success(`Invited ${email} as ${role}`);
       return data.member;
     } catch (error: any) {
-      console.error('Error inviting member:', error);
       toast.error(error.message || 'Failed to invite member');
       throw error;
     }
@@ -179,7 +174,6 @@ export class ProjectAPI {
       toast.success(`Role updated to ${role}`);
       return data.member;
     } catch (error: any) {
-      console.error('Error updating member role:', error);
       toast.error(error.message || 'Failed to update role');
       throw error;
     }
@@ -206,7 +200,6 @@ export class ProjectAPI {
 
       toast.success('Member removed');
     } catch (error: any) {
-      console.error('Error removing member:', error);
       toast.error(error.message || 'Failed to remove member');
       throw error;
     }

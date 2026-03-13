@@ -70,7 +70,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return false;
       }
     } catch (error) {
-      console.error('Error loading payment plan:', error);
       if (!keepOptimisticOnFailure) {
         const stored = localStorage.getItem(`paymentPlan_${user.id}`);
         setPaymentPlanState((stored as PaymentPlan) || null);
@@ -113,9 +112,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const urlParams = new URLSearchParams(window.location.search);
         
         // If URL contains auth tokens/params, this is likely a fresh OAuth sign-in
-        if (urlHash.includes('access_token') || urlParams.has('code')) {
-          console.log('OAuth sign-in detected');
-        }
+
       }
     });
 
@@ -208,7 +205,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
       toast.success('Signed out successfully');
     } catch (error) {
-      console.error('Error signing out:', error);
       throw error;
     }
   };

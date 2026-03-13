@@ -239,8 +239,8 @@ function ProjectSettings() {
         const memberData = await projectAPI.getProjectMembers(project.id);
         setMembers(memberData);
       }
-    } catch (error) {
-      console.error('Error loading project data:', error);
+    } catch {
+      // Silent catch
     } finally {
       setIsLoading(false);
     }

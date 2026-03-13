@@ -82,8 +82,6 @@ dist/
       
       // Add initial files
       await this.git.add(['*.3dm', '.gitignore']);
-      
-      console.log(`Git repository initialized at: ${repoPath}`);
     }
   }
 
@@ -134,7 +132,6 @@ dist/
         hasRemote
       };
     } catch (error) {
-      console.error('Error getting git status:', error);
       throw error;
     }
   }
@@ -146,7 +143,6 @@ dist/
     try {
       await this.git.add(files);
     } catch (error) {
-      console.error('Error staging files:', error);
       throw error;
     }
   }
@@ -162,11 +158,11 @@ dist/
       }
 
       const result = await this.git.commit(message);
-      
+
       // Get commit info
       const log = await this.git.log({ maxCount: 1 });
       const latestCommit = log.latest;
-      
+
       if (!latestCommit) {
         throw new Error('Failed to retrieve commit information');
       }
@@ -179,7 +175,6 @@ dist/
         files: files || []
       };
     } catch (error) {
-      console.error('Error committing changes:', error);
       throw error;
     }
   }
@@ -190,7 +185,7 @@ dist/
   async getLog(maxCount = 50): Promise<GitCommitInfo[]> {
     try {
       const log: LogResult = await this.git.log({ maxCount });
-      
+
       return log.all.map(commit => ({
         hash: commit.hash,
         message: commit.message,
@@ -199,7 +194,6 @@ dist/
         files: [] // Would need additional calls to get file list per commit
       }));
     } catch (error) {
-      console.error('Error getting git log:', error);
       throw error;
     }
   }
@@ -211,7 +205,6 @@ dist/
     try {
       await this.git.checkout(commitHash);
     } catch (error) {
-      console.error('Error checking out commit:', error);
       throw error;
     }
   }
@@ -227,7 +220,6 @@ dist/
         await this.git.reset([commitHash]);
       }
     } catch (error) {
-      console.error('Error resetting to commit:', error);
       throw error;
     }
   }
@@ -239,7 +231,6 @@ dist/
     try {
       return await this.git.pull();
     } catch (error) {
-      console.error('Error pulling changes:', error);
       throw error;
     }
   }
@@ -251,7 +242,6 @@ dist/
     try {
       return await this.git.push();
     } catch (error) {
-      console.error('Error pushing changes:', error);
       throw error;
     }
   }
@@ -263,7 +253,6 @@ dist/
     try {
       await this.git.addRemote(name, url);
     } catch (error) {
-      console.error('Error adding remote:', error);
       throw error;
     }
   }
@@ -275,7 +264,6 @@ dist/
     try {
       return await this.git.getRemotes(true);
     } catch (error) {
-      console.error('Error getting remotes:', error);
       throw error;
     }
   }
@@ -287,7 +275,7 @@ dist/
     try {
       await this.git.status();
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -298,8 +286,7 @@ dist/
   async getCurrentBranch(): Promise<string> {
     try {
       return await this.git.revparse(['--abbrev-ref', 'HEAD']);
-    } catch (error) {
-      console.error('Error getting current branch:', error);
+    } catch {
       return 'main';
     }
   }
@@ -315,7 +302,6 @@ dist/
         await this.git.branch([branchName]);
       }
     } catch (error) {
-      console.error('Error creating branch:', error);
       throw error;
     }
   }
@@ -327,7 +313,6 @@ dist/
     try {
       await this.git.checkout(branchName);
     } catch (error) {
-      console.error('Error switching branch:', error);
       throw error;
     }
   }
@@ -340,10 +325,9 @@ dist/
       const result = await this.git.branch(['-a']);
       const local = result.all.filter(branch => !branch.startsWith('remotes/'));
       const remote = result.all.filter(branch => branch.startsWith('remotes/'));
-      
+
       return { local, remote };
     } catch (error) {
-      console.error('Error getting branches:', error);
       throw error;
     }
   }

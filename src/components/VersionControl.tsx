@@ -427,41 +427,34 @@ export const VersionControl = () => {
 
   const handleRestoreCommit = async (commitId: string) => {
     try {
-      const success = await restoreToCommit(commitId);
-      if (success) {
-        console.log(`Model restored to commit: ${commitId}`);
-      }
-    } catch (error) {
-      console.error("Failed to restore commit:", error);
+      await restoreToCommit(commitId);
+    } catch {
+      // Silent catch
     }
   };
 
   const handlePullCommit = async (commitId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const success = await pullFromCommit(commitId);
-      if (success) {
-        console.log(`File pulled to commit: ${commitId}`);
-      }
-    } catch (error) {
-      console.error("Failed to pull commit:", error);
+      await pullFromCommit(commitId);
+    } catch {
+      // Silent catch
     }
   };
 
   const handleCommit = async () => {
     if (!commitMessage.trim() || isCommitting) return;
-    
+
     if (!hasUnsavedChanges || !loadedModel) {
       return;
     }
-    
+
     setIsCommitting(true);
-    
+
     try {
       await commitModelChanges(commitMessage.trim(), loadedModel);
       setCommitMessage("");
-    } catch (error) {
-      console.error("Failed to commit:", error);
+    } catch {
       toast.error("Failed to save version");
     } finally {
       setIsCommitting(false);
@@ -474,9 +467,7 @@ export const VersionControl = () => {
 
   const handleCloseModel = () => {
     clearModel();
-    clearCurrentModel().catch(err => {
-      console.warn('Error clearing model:', err);
-    });
+    clearCurrentModel().catch(() => {});
   };
 
   // Filter commits based on search and starred filter

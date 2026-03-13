@@ -17,7 +17,6 @@ const __dirname = dirname(__filename);
 // Load .env from backend directory, not root
 const envPath = join(__dirname, '.env');
 dotenv.config({ path: envPath });
-console.log('📁 Loading .env from:', envPath);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,9 +60,8 @@ async function ensureS3Cors() {
       },
     });
     await s3Client.send(command);
-    console.log('✅ S3 bucket CORS configured for', BUCKET_NAME);
   } catch (err) {
-    console.error('⚠️ Failed to set S3 CORS (presigned URL uploads may fail in browser):', err.message);
+    // S3 CORS configuration failure is non-critical
   }
 }
 ensureS3Cors();
@@ -79,13 +77,10 @@ const INVITE_FROM_EMAIL = process.env.INVITE_FROM_EMAIL; // Verified sender in S
 
 // Initialize Supabase client for auth verification
 if (!process.env.SUPABASE_URL) {
-  console.error('❌ ERROR: SUPABASE_URL is not set in .env file');
   process.exit(1);
 }
 
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ ERROR: SUPABASE_SERVICE_ROLE_KEY is not set in .env file');
-  console.error('   Get it from: Supabase Dashboard → Settings → API → service_role key');
   process.exit(1);
 }
 
@@ -94,35 +89,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY // Use service role key for backend
 );
 
-// Validate the key format
-if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  const keyLength = process.env.SUPABASE_SERVICE_ROLE_KEY.length;
-  if (keyLength < 100) {
-    console.error('⚠️ WARNING: Service role key seems too short. Expected 100+ characters, got', keyLength);
-    console.error('   Make sure you copied the FULL service_role key, not the anon key.');
-  }
-  // Check if it looks like anon key (starts with eyJ and is shorter)
-  if (process.env.SUPABASE_SERVICE_ROLE_KEY.startsWith('eyJ') && keyLength < 200) {
-    console.error('⚠️ WARNING: This might be an anon key, not a service_role key!');
-    console.error('   Service role keys are typically longer. Check Supabase Dashboard → Settings → API');
-  }
-}
-
-console.log('✅ Supabase client initialized:', process.env.SUPABASE_URL);
-console.log('   Key length:', process.env.SUPABASE_SERVICE_ROLE_KEY?.length || 'NOT SET');
-
 // Initialize Stripe
 if (!process.env.STRIPE_SECRET_KEY) {
-  console.error('❌ ERROR: STRIPE_SECRET_KEY is not set in .env file');
-  console.error('   Get it from: Stripe Dashboard → Developers → API keys → Secret key');
   process.exit(1);
 }
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2024-12-18.acacia',
 });
-
-console.log('✅ Stripe client initialized');
 
 // Middleware to verify Supabase JWT token
 async function verifyAuth(req, res, next) {
@@ -138,16 +112,13 @@ async function verifyAuth(req, res, next) {
     const { data: { user }, error } = await supabase.auth.getUser(token);
     
     if (error) {
-      console.error('Token verification error:', error.message);
-      console.error('Error details:', error);
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Invalid or expired token',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
-    
+
     if (!user) {
-      console.error('No user returned from token verification');
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
@@ -155,7 +126,6 @@ async function verifyAuth(req, res, next) {
     req.user = user;
     next();
   } catch (error) {
-    console.error('Auth verification error:', error);
     res.status(401).json({ error: 'Authentication failed' });
   }
 }
@@ -179,10 +149,9 @@ async function resolvePendingInvites(user) {
         .from('project_members')
         .update({ user_id: user.id, status: 'active', updated_at: new Date().toISOString() })
         .in('id', ids);
-      console.log(`✅ Resolved ${ids.length} pending invite(s) for ${user.email}`);
     }
   } catch (err) {
-    console.error('Error resolving pending invites:', err);
+    // Non-critical: invite resolution failure doesn't block auth
   }
 }
 
@@ -235,12 +204,9 @@ app.get('/api/aws/presigned-upload', verifyAuth, async (req, res) => {
       expiresIn: parseInt(expiresIn) 
     });
   } catch (error) {
-    console.error('Error generating presigned upload URL:', error);
-    
     if (error.message.includes('does not belong to user')) {
       return res.status(403).json({ error: error.message });
     }
-    
     res.status(500).json({ error: 'Failed to generate upload URL' });
   }
 });
@@ -270,12 +236,9 @@ app.get('/api/aws/presigned-download', verifyAuth, async (req, res) => {
       expiresIn: parseInt(expiresIn) 
     });
   } catch (error) {
-    console.error('Error generating presigned download URL:', error);
-    
     if (error.message.includes('does not belong to user')) {
       return res.status(403).json({ error: error.message });
     }
-    
     res.status(500).json({ error: 'Failed to generate download URL' });
   }
 });
@@ -309,12 +272,9 @@ app.get('/api/aws/list-versions', verifyAuth, async (req, res) => {
 
     res.json({ versions });
   } catch (error) {
-    console.error('Error listing versions:', error);
-    
     if (error.message.includes('does not belong to user')) {
       return res.status(403).json({ error: error.message });
     }
-    
     res.status(500).json({ error: 'Failed to list versions' });
   }
 });
@@ -341,12 +301,9 @@ app.delete('/api/aws/delete-version', verifyAuth, async (req, res) => {
     
     res.json({ success: true });
   } catch (error) {
-    console.error('Error deleting version:', error);
-    
     if (error.message.includes('does not belong to user')) {
       return res.status(403).json({ error: error.message });
     }
-    
     res.status(500).json({ error: 'Failed to delete version' });
   }
 });
@@ -388,7 +345,6 @@ app.post('/api/projects', verifyAuth, async (req, res) => {
       .single();
 
     if (error) {
-      console.error('Error creating project:', error);
       return res.status(500).json({ error: 'Failed to create project' });
     }
 
@@ -402,10 +358,8 @@ app.post('/api/projects', verifyAuth, async (req, res) => {
       status: 'active',
     });
 
-    console.log('✅ Project registered:', project.id, name);
     res.json(project);
   } catch (error) {
-    console.error('Error registering project:', error);
     res.status(500).json({ error: 'Failed to register project' });
   }
 });
@@ -424,7 +378,6 @@ app.get('/api/projects/user-projects', verifyAuth, async (req, res) => {
       .order('created_at', { ascending: false });
 
     if (ownedError) {
-      console.error('Error fetching owned projects:', ownedError);
       return res.status(500).json({ error: 'Failed to fetch projects' });
     }
 
@@ -441,7 +394,6 @@ app.get('/api/projects/user-projects', verifyAuth, async (req, res) => {
       .neq('role', 'owner');
 
     if (memberError) {
-      console.error('Error fetching memberships:', memberError);
       return res.status(500).json({ error: 'Failed to fetch projects' });
     }
 
@@ -470,7 +422,6 @@ app.get('/api/projects/user-projects', verifyAuth, async (req, res) => {
 
     res.json({ projects: unique });
   } catch (error) {
-    console.error('Error fetching user projects:', error);
     res.status(500).json({ error: 'Failed to fetch projects' });
   }
 });
@@ -496,7 +447,6 @@ app.get('/api/projects/by-path', verifyAuth, async (req, res) => {
     }
 
     if (error) {
-      console.error('Error fetching project:', error);
       return res.status(500).json({ error: 'Failed to fetch project' });
     }
 
@@ -517,7 +467,6 @@ app.get('/api/projects/by-path', verifyAuth, async (req, res) => {
 
     res.json(project);
   } catch (error) {
-    console.error('Error fetching project by path:', error);
     res.status(500).json({ error: 'Failed to fetch project' });
   }
 });
@@ -576,7 +525,6 @@ async function checkProjectPermission(projectId, userId, minRole = 'viewer', use
 // Send project invite email via Amazon SES (no-op if INVITE_FROM_EMAIL not set)
 async function sendProjectInviteEmail({ toEmail, projectName, inviterEmail, role, appUrl }) {
   if (!INVITE_FROM_EMAIL) {
-    console.log('⏭️ Skipping invite email (INVITE_FROM_EMAIL not set)');
     return;
   }
   const appLink = appUrl || process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -599,9 +547,8 @@ async function sendProjectInviteEmail({ toEmail, projectName, inviterEmail, role
       },
     });
     await sesClient.send(command);
-    console.log('✅ Invite email sent to', toEmail);
   } catch (err) {
-    console.error('Failed to send invite email:', err);
+    // Non-critical: email failure doesn't block invite creation
   }
 }
 
@@ -633,13 +580,11 @@ app.get('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
       .order('created_at', { ascending: true });
 
     if (error) {
-      console.error('Error fetching members:', error);
       return res.status(500).json({ error: 'Failed to fetch members' });
     }
 
     res.json({ members: members || [] });
   } catch (error) {
-    console.error('Error fetching project members:', error);
     res.status(500).json({ error: 'Failed to fetch members' });
   }
 });
@@ -707,11 +652,8 @@ app.post('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
       .single();
 
     if (error) {
-      console.error('Error inviting member:', error);
       return res.status(500).json({ error: 'Failed to invite member' });
     }
-
-    console.log('✅ Member invited:', email, 'as', role, 'to project', projectId);
 
     // Send invite email via SES (same AWS creds; does not fail the request if email fails)
     const { data: project } = await supabase
@@ -730,7 +672,6 @@ app.post('/api/projects/:projectId/members', verifyAuth, async (req, res) => {
 
     res.json({ member });
   } catch (error) {
-    console.error('Error inviting member:', error);
     res.status(500).json({ error: 'Failed to invite member' });
   }
 });
@@ -779,14 +720,11 @@ app.put('/api/projects/:projectId/members/:memberId/role', verifyAuth, async (re
       .single();
 
     if (error) {
-      console.error('Error updating member role:', error);
       return res.status(500).json({ error: 'Failed to update role' });
     }
 
-    console.log('✅ Member role updated:', memberId, 'to', role);
     res.json({ member: updatedMember });
   } catch (error) {
-    console.error('Error updating member role:', error);
     res.status(500).json({ error: 'Failed to update role' });
   }
 });
@@ -829,14 +767,11 @@ app.delete('/api/projects/:projectId/members/:memberId', verifyAuth, async (req,
       .eq('project_id', projectId);
 
     if (error) {
-      console.error('Error removing member:', error);
       return res.status(500).json({ error: 'Failed to remove member' });
     }
 
-    console.log('✅ Member removed:', memberId, 'from project', projectId);
     res.json({ success: true });
   } catch (error) {
-    console.error('Error removing member:', error);
     res.status(500).json({ error: 'Failed to remove member' });
   }
 });
@@ -872,7 +807,6 @@ app.post('/api/projects/:projectId/sync/push-url', verifyAuth, async (req, res) 
 
     res.json({ upload_url: url, s3_key: s3Key });
   } catch (error) {
-    console.error('Error generating sync push URL:', error);
     res.status(500).json({ error: 'Failed to generate upload URL' });
   }
 });
@@ -903,12 +837,9 @@ app.post('/api/projects/:projectId/sync/pull-url', verifyAuth, async (req, res) 
 
     res.json({ download_url: url, s3_key: s3Key });
   } catch (error) {
-    console.error('Error generating sync pull URL:', error);
-
     if (error.name === 'NoSuchKey' || error.Code === 'NoSuchKey') {
       return res.status(404).json({ error: 'File not found in cloud storage' });
     }
-
     res.status(500).json({ error: 'Failed to generate download URL' });
   }
 });
@@ -940,12 +871,9 @@ app.post('/api/projects/:projectId/sync/pull-content', verifyAuth, async (req, r
     res.setHeader('Content-Type', 'application/json');
     res.send(body);
   } catch (error) {
-    console.error('Error downloading sync file:', error);
-
     if (error.name === 'NoSuchKey' || error.Code === 'NoSuchKey') {
       return res.status(404).json({ error: 'File not found in cloud storage' });
     }
-
     res.status(500).json({ error: 'Failed to download file' });
   }
 });
@@ -980,7 +908,6 @@ app.get('/api/projects/:projectId/sync/list', verifyAuth, async (req, res) => {
 
     res.json({ files });
   } catch (error) {
-    console.error('Error listing sync files:', error);
     res.status(500).json({ error: 'Failed to list project files' });
   }
 });
@@ -1000,27 +927,13 @@ app.post('/api/stripe/create-checkout-session', verifyAuth, async (req, res) => 
 
     // Try lookup_key first, then fall back to price_id
     if (lookup_key) {
-      console.log('🔍 Looking up Stripe price with lookup_key:', lookup_key);
       const prices = await stripe.prices.list({
         lookup_keys: [lookup_key],
         expand: ['data.product'],
       });
 
       if (prices.data.length === 0) {
-        console.error('❌ Price not found for lookup_key:', lookup_key);
-        console.error('   Available prices in your Stripe account:');
-        
-        // List all prices to help debug
-        try {
-          const allPrices = await stripe.prices.list({ limit: 10 });
-          allPrices.data.forEach(p => {
-            console.log(`   - ${p.lookup_key || '(no lookup_key)'}: ${p.id} - ${p.unit_amount ? `$${(p.unit_amount / 100).toFixed(2)}` : 'N/A'}`);
-          });
-        } catch (err) {
-          console.error('   Could not list prices:', err.message);
-        }
-        
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'Price not found',
           lookup_key: lookup_key,
           hint: 'Check your Stripe Dashboard → Products → Prices to find the correct lookup_key, or use price_id instead'
@@ -1030,12 +943,10 @@ app.post('/api/stripe/create-checkout-session', verifyAuth, async (req, res) => 
       price = prices.data[0];
     } else if (price_id) {
       // Use price_id directly
-      console.log('🔍 Looking up Stripe price with price_id:', price_id);
       try {
         price = await stripe.prices.retrieve(price_id);
       } catch (error) {
-        console.error('❌ Price not found for price_id:', price_id);
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'Price not found',
           price_id: price_id,
           hint: 'Check that the price_id is correct in your Stripe Dashboard'
@@ -1059,13 +970,6 @@ app.post('/api/stripe/create-checkout-session', verifyAuth, async (req, res) => 
       }
     }
 
-    console.log('💰 Creating checkout session for:', {
-      priceId: price.id,
-      plan: planName,
-      userEmail: req.user.email,
-      userId: req.user.id
-    });
-
     // Create Checkout Session
     const session = await stripe.checkout.sessions.create({
       billing_address_collection: 'auto',
@@ -1085,15 +989,9 @@ app.post('/api/stripe/create-checkout-session', verifyAuth, async (req, res) => 
       },
     });
 
-    console.log('✅ Checkout session created:', session.id);
     res.json({ sessionId: session.id, url: session.url });
   } catch (error) {
-    console.error('❌ Error creating checkout session:', error);
-    console.error('   Error type:', error.type);
-    console.error('   Error message:', error.message);
-    console.error('   Error code:', error.code);
-    
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to create checkout session',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
@@ -1110,7 +1008,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
   } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -1121,21 +1018,13 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
       
       // When payment succeeds, update subscription status to active
       if (invoice.subscription) {
-        console.log('💰 Invoice payment succeeded for subscription:', invoice.subscription);
-        
-        const { error: updateError } = await supabase
+        await supabase
           .from('subscriptions')
           .update({
             status: 'active',
             updated_at: new Date().toISOString(),
           })
           .eq('stripe_subscription_id', invoice.subscription);
-
-        if (updateError) {
-          console.error('Error updating subscription status to active:', updateError);
-        } else {
-          console.log('✅ Subscription marked as active');
-        }
       }
       break;
 
@@ -1144,19 +1033,13 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
       
       // When payment fails, update subscription status
       if (failedInvoice.subscription) {
-        console.log('❌ Invoice payment failed for subscription:', failedInvoice.subscription);
-        
-        const { error: failError } = await supabase
+        await supabase
           .from('subscriptions')
           .update({
             status: 'past_due',
             updated_at: new Date().toISOString(),
           })
           .eq('stripe_subscription_id', failedInvoice.subscription);
-
-        if (failError) {
-          console.error('Error updating subscription status to past_due:', failError);
-        }
       }
       break;
 
@@ -1193,7 +1076,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
         .single();
 
       if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error('Error checking existing subscription:', fetchError);
         break;
       }
 
@@ -1210,9 +1092,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
           })
           .eq('stripe_subscription_id', newSubscription.id);
 
-        if (updateError) {
-          console.error('Error updating subscription:', updateError);
-        }
       } else {
         // Find user by customer ID if available
         let userId = newSubscription.metadata?.userId || null;
@@ -1241,9 +1120,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
             status: status,
           });
 
-        if (insertError) {
-          console.error('Error creating subscription:', insertError);
-        }
       }
       break;
 
@@ -1258,12 +1134,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
         .single();
 
       if (subError && subError.code !== 'PGRST116') {
-        console.error('Error finding subscription:', subError);
         break;
       }
 
       if (!subscriptionData) {
-        console.log('Subscription not found in database, skipping update');
         break;
       }
 
@@ -1288,9 +1162,6 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
         })
         .eq('id', subscriptionData.id);
 
-      if (updateSubError) {
-        console.error('Error updating subscription status:', updateSubError);
-      }
       break;
 
     case 'customer.subscription.deleted':
@@ -1304,12 +1175,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
         .single();
 
       if (deletedSubError && deletedSubError.code !== 'PGRST116') {
-        console.error('Error finding subscription:', deletedSubError);
         break;
       }
 
       if (!deletedSubData) {
-        console.log('Subscription not found in database, skipping deletion');
         break;
       }
 
@@ -1322,13 +1191,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
         })
         .eq('id', deletedSubData.id);
 
-      if (deleteSubError) {
-        console.error('Error updating subscription status to canceled:', deleteSubError);
-      }
       break;
 
     default:
-      console.log(`Unhandled event type ${event.type}`);
+      // Unhandled event type - ignore
   }
 
   res.json({ received: true });
@@ -1343,13 +1209,6 @@ app.post('/api/stripe/create-subscription-intent', verifyAuth, async (req, res) 
       return res.status(400).json({ error: 'Missing price_id parameter' });
     }
 
-    console.log('💳 Creating subscription intent for:', {
-      priceId: price_id,
-      plan: plan,
-      userEmail: req.user.email,
-      userId: req.user.id
-    });
-
     // Check if customer already exists
     let customer;
     const existingCustomers = await stripe.customers.list({
@@ -1359,7 +1218,6 @@ app.post('/api/stripe/create-subscription-intent', verifyAuth, async (req, res) 
 
     if (existingCustomers.data.length > 0) {
       customer = existingCustomers.data[0];
-      console.log('✅ Found existing customer:', customer.id);
     } else {
       // Create a new customer
       customer = await stripe.customers.create({
@@ -1368,7 +1226,6 @@ app.post('/api/stripe/create-subscription-intent', verifyAuth, async (req, res) 
           userId: req.user.id,
         },
       });
-      console.log('✅ Created new customer:', customer.id);
     }
 
     // Retrieve the price to get the amount
@@ -1376,8 +1233,7 @@ app.post('/api/stripe/create-subscription-intent', verifyAuth, async (req, res) 
     try {
       price = await stripe.prices.retrieve(price_id);
     } catch (error) {
-      console.error('❌ Price not found:', price_id);
-      return res.status(404).json({ 
+      return res.status(404).json({
         error: 'Price not found',
         price_id: price_id,
         hint: 'Check that the price_id is correct in your Stripe Dashboard'
@@ -1406,9 +1262,6 @@ app.post('/api/stripe/create-subscription-intent', verifyAuth, async (req, res) 
       throw new Error('Failed to create payment intent for subscription');
     }
 
-    console.log('✅ Subscription created:', subscription.id);
-    console.log('✅ Payment intent created:', paymentIntent.id);
-
     // Store the subscription in our database (pending status until payment completes)
     const { error: dbError } = await supabase
       .from('subscriptions')
@@ -1423,21 +1276,14 @@ app.post('/api/stripe/create-subscription-intent', verifyAuth, async (req, res) 
         onConflict: 'user_id',
       });
 
-    if (dbError) {
-      console.error('Warning: Failed to store subscription in database:', dbError);
-      // Don't fail the request, just log the warning
-    }
+    // dbError is non-critical: don't fail the request
 
     res.json({
       subscriptionId: subscription.id,
       clientSecret: paymentIntent.client_secret,
     });
   } catch (error) {
-    console.error('❌ Error creating subscription intent:', error);
-    console.error('   Error type:', error.type);
-    console.error('   Error message:', error.message);
-    
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to create subscription',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
@@ -1455,7 +1301,6 @@ app.get('/api/stripe/payment-status', verifyAuth, async (req, res) => {
       .single();
 
     if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching payment status:', error);
       return res.status(500).json({ error: 'Failed to fetch payment status' });
     }
 
@@ -1473,23 +1318,16 @@ app.get('/api/stripe/payment-status', verifyAuth, async (req, res) => {
       status: subscription.status,
     });
   } catch (error) {
-    console.error('Error getting payment status:', error);
     res.status(500).json({ error: 'Failed to get payment status' });
   }
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Backend API running on http://localhost:${PORT}`);
-  console.log(`📦 S3 Bucket: ${BUCKET_NAME || 'NOT CONFIGURED'}`);
-  console.log(`🌍 Region: ${process.env.AWS_REGION || 'us-east-1'}`);
-  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.S3_BUCKET_NAME) {
-    console.warn('⚠️  Warning: AWS credentials not configured. Please set up .env file.');
-  }
+  // Server started
 });

@@ -160,13 +160,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         localStorage.setItem(branchStorageKey, JSON.stringify(branchesToSave));
       }
       
-      console.log(`Saved ${commitsToSave.length} commits to localStorage for: ${filePath}`);
-    } catch (error) {
-      console.error('Failed to save commits to localStorage:', error);
-      // If quota exceeded, try to clean up old entries
-      if (error instanceof Error && error.name === 'QuotaExceededError') {
-        console.warn('localStorage quota exceeded, consider using IndexedDB for larger files');
-      }
+    } catch {
+      // Silent catch
     }
   }, [getStorageKey]);
 
@@ -210,11 +205,10 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           })
         );
         
-        console.log(`Loaded ${commits.length} commits and ${loadedBranches.length} branches from localStorage for: ${filePath}`);
         return { commits, branches: loadedBranches };
       }
-    } catch (error) {
-      console.error('Failed to load commits from localStorage:', error);
+    } catch {
+      // Silent catch
     }
     return { commits: [], branches: [] };
   }, [getStorageKey]);
@@ -252,12 +246,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       };
 
       await desktopAPI.saveTreeFile(filePath, treeData);
-      console.log(`Saved tree.json for: ${filePath}`);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (!errorMessage.includes('ENOENT') && !errorMessage.includes('not found')) {
-        console.warn('Failed to save tree.json (non-critical):', errorMessage);
-      }
+    } catch {
+      // Silent catch (non-critical)
     }
   }, [branches, commits, activeBranchId, currentCommitId, previouslyWorkingBranchId]);
 
@@ -269,14 +259,11 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       const treeData = await desktopAPI.loadTreeFile(filePath);
       if (!treeData) return null;
 
-      console.log(`Loaded tree.json for: ${filePath}`);
-
       // Validate commit files exist
       const commitIds = treeData.commits.map((c: any) => c.id);
       const missingCommitIds = await desktopAPI.validateCommitFiles(filePath, commitIds);
       
       if (missingCommitIds.length > 0) {
-        console.warn(`⚠️ Warning: ${missingCommitIds.length} commit file(s) missing:`, missingCommitIds);
         // Filter out commits with missing files
         treeData.commits = treeData.commits.filter((c: any) => !missingCommitIds.includes(c.id));
       }
@@ -314,8 +301,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         previouslyWorkingBranchId: loadedPreviouslyWorkingBranchId,
         cloudSyncedCommitIds: loadedCloudSyncedIds,
       };
-    } catch (error) {
-      console.error('Failed to load tree.json:', error);
+    } catch {
       return null;
     }
   }, []);
@@ -328,7 +314,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setModelName(fileName);
     
     // Clear unsaved changes only when switching to a different model
-    console.log('Model switched, clearing unsaved changes for new model:', path);
     setHasUnsavedChanges(false);
     setPulledCommitId(null);
 
@@ -340,8 +325,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       const treeData = await loadTreeFile(path);
       
       if (treeData && treeData.commits.length > 0) {
-        console.log(`Loaded ${treeData.commits.length} commits and ${treeData.branches.length} branches from tree.json`);
-        
         if (treeData.previouslyWorkingBranchId) {
           setPreviouslyWorkingBranchId(treeData.previouslyWorkingBranchId);
         }
@@ -376,7 +359,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
                 const proj = allProjects.find(p => p.id === mappedProjectId);
                 if (proj) {
                   setCloudProject(proj);
-                  console.log('Cloud project detected via local mapping:', proj.id, proj.name);
                   return;
                 }
               }
@@ -388,7 +370,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
               setCloudProject(proj);
               // Also save mapping for future lookups
               if (userId) setCloudProjectPath(userId, proj.id, path);
-              console.log('Cloud project detected via file path:', proj.id, proj.name);
             }
           } catch {
             // Not cloud-enabled, that's fine
@@ -415,7 +396,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
       
       if (persistedCommits.length > 0) {
-        console.log(`Found ${persistedCommits.length} persisted commits for file from localStorage`);
         setCommits(persistedCommits);
         // Set current commit to the latest one
         const latestCommit = persistedCommits[0];
@@ -437,19 +417,16 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     const targetPath = filePath || currentModel;
     
     if (!targetPath) {
-      console.warn('createInitialCommit called without filePath and currentModel is not set');
       return;
     }
 
     // Wait for tree loading to complete before creating initial commit
     // This prevents race conditions where we create a duplicate initial commit
     if (treeLoadPromise) {
-      console.log('Waiting for tree.json to finish loading before creating initial commit...');
       try {
         await treeLoadPromise;
-        console.log('Tree loading complete, checking if initial commit is needed...');
-      } catch (error) {
-        console.warn('Tree loading failed, will proceed with initial commit creation:', error);
+      } catch {
+        // Silent catch
       }
     }
 
@@ -464,7 +441,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
 
     // If we have commits from tree.json, don't create a new initial commit
     if (currentCommitsCount > 0) {
-      console.log(`Skipping initial commit creation - ${currentCommitsCount} commits already exist from tree.json`);
       // Update the modelData for the current commit (so we have it for display)
       setCommits(prevCommits => {
         if (prevCommits.length > 0) {
@@ -519,8 +495,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     
     setCurrentCommitId(initialCommit.id);
     updatePresenceCommit(initialCommit.id);
-    console.log("Created initial commit:", initialCommit.id, fileBuffer ? `with ${fileBuffer.byteLength} byte file buffer` : 'without file buffer');
-    
+
     const updatedCommits = [initialCommit];
     setCommits(updatedCommits);
     
@@ -542,9 +517,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     if (fileBuffer && desktopAPI.isDesktop) {
       try {
         await desktopAPI.saveCommitFile(targetPath, initialCommit.id, fileBuffer);
-        console.log(`Successfully saved initial commit file: commit-${initialCommit.id}.3dm`);
-      } catch (err) {
-        console.error('Failed to save commit file to 0studio folder:', err);
+      } catch {
+        // Silent catch
       }
     }
     
@@ -575,9 +549,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           })),
         };
         await desktopAPI.saveTreeFile(targetPath, treeData);
-        console.log(`Successfully saved tree.json for initial commit`);
-      } catch (err) {
-        console.error('Failed to save tree.json for initial commit:', err);
+      } catch {
+        // Silent catch
       }
     }
   }, [currentModel, saveCommitsToStorage, treeLoadPromise]);
@@ -587,32 +560,18 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   useEffect(() => {
     if (currentModel && (branches.length > 0 || commits.length > 0) && !isLoadingTree) {
       // Use a ref to track if we're currently clearing to avoid race conditions
-      saveTreeFile(currentModel).catch(error => {
-        // Only log if it's not a "file doesn't exist" type error (which can happen during cleanup)
-        if (error && !error.message?.includes('ENOENT') && !error.message?.includes('not found')) {
-          console.warn('Failed to auto-save tree.json (non-critical):', error);
-        }
-      });
+      saveTreeFile(currentModel).catch(() => {});
     }
   }, [branches, commits, activeBranchId, currentCommitId, previouslyWorkingBranchId, currentModel, saveTreeFile, isLoadingTree]);
 
-  // Debug: Track hasUnsavedChanges state changes
-  useEffect(() => {
-    console.log('hasUnsavedChanges state changed to:', hasUnsavedChanges);
-  }, [hasUnsavedChanges]);
 
   // File change detection - mark unsaved changes when file changes on disk
   useEffect(() => {
     if (!desktopAPI.isDesktop || !currentModel) return;
 
     const handleFileChange = (event: any) => {
-      console.log('File changed detected in version control:', event);
-      
       if (event.eventType === 'change' && event.filePath && event.filePath === currentModel) {
-        console.log('Model file changed on disk - marking as having unsaved changes');
-        console.log('Before setting hasUnsavedChanges:', hasUnsavedChanges);
         setHasUnsavedChanges(true);
-        console.log('hasUnsavedChanges should now be true');
       }
     };
 
@@ -638,9 +597,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         const buffer = await desktopAPI.readFileBuffer(currentModel);
         if (buffer) {
           fileBuffer = buffer;
-          console.log('Read exact file buffer from disk for commit:', buffer.byteLength, 'bytes');
-        } else {
-          console.warn('Failed to read file buffer from disk, commit will not have exact file');
         }
       }
 
@@ -678,7 +634,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         targetBranchId = newBranchId;
         parentCommitId = pulledCommitId;
         
-        console.log(`Creating new branch "${branchName}" from commit ${pulledCommitId}`);
       }
 
       // Generate a unique commit ID with timestamp and random component to avoid collisions
@@ -739,10 +694,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       if (fileBuffer && currentModel && desktopAPI.isDesktop) {
         try {
           await desktopAPI.saveCommitFile(currentModel, newCommit.id, fileBuffer);
-          console.log("Saved commit file to 0studio folder:", newCommit.id);
         } catch (error) {
-          console.error("Failed to save commit file to 0studio folder:", error);
-          toast.error("Failed to save commit file. Please check console for details.");
+          toast.error("Failed to save commit file.");
           throw error;
         }
       }
@@ -752,10 +705,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       setHasUnsavedChanges(false);
       setPulledCommitId(null); // Clear pulled commit after successful commit
 
-      console.log("Model commit created with file buffer:", newCommit.id, fileBuffer ? `${fileBuffer.byteLength} bytes` : 'no buffer');
       toast.success(newBranch ? `New branch "${newBranch.name}" created` : "Commit saved successfully");
     } catch (error) {
-      console.error("Failed to commit model changes:", error);
       throw error;
     }
   }, [currentModel, currentCommitId, activeBranchId, branches, pulledCommitId, saveCommitsToStorage]);
@@ -778,7 +729,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     try {
       const commit = commits.find(c => c.id === commitId);
       if (!commit) {
-        console.error("Commit not found:", commitId);
         return false;
       }
 
@@ -788,14 +738,12 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         const storedFile = await desktopAPI.readCommitFile(currentModel, commitId);
         if (storedFile) {
           fileBuffer = storedFile;
-          console.log('Using file buffer from 0studio folder for restore:', fileBuffer.byteLength, 'bytes');
         }
       }
 
       // Priority 2: Fall back to in-memory file buffer
       if (!fileBuffer && commit.fileBuffer) {
         fileBuffer = commit.fileBuffer;
-        console.log('Using in-memory file buffer from commit for restore:', fileBuffer.byteLength, 'bytes');
       }
 
       // Priority 3: Fall back to IndexedDB
@@ -803,7 +751,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         const storedBuffer = await getFileBuffer(commitId, currentModel);
         if (storedBuffer) {
           fileBuffer = storedBuffer;
-          console.log('Using file buffer from IndexedDB for restore:', fileBuffer.byteLength, 'bytes');
         }
       }
 
@@ -813,9 +760,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         try {
           const { exportModelToBuffer } = await import('@/lib/rhino3dm-service');
           fileBuffer = await exportModelToBuffer(modelData);
-          console.warn('Warning: Using exported model data for restore (may not be exact file)');
-        } catch (exportError) {
-          console.error('Failed to export model data to buffer:', exportError);
+        } catch {
+          // Silent catch
         }
       }
 
@@ -825,20 +771,16 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         const { load3dmFile } = await import('@/lib/rhino3dm-service');
         const loaded = await load3dmFile(file);
         modelData = loaded;
-        console.log('Loaded model from commit file for restore');
       }
 
       if (!modelData) {
-        console.error("No model data found for commit:", commitId);
         return false;
       }
 
       // Restore the model by calling the callback provided by ModelContext
       if (onModelRestore) {
         onModelRestore(modelData);
-        console.log("Model restored to commit:", commit);
       } else {
-        console.error("Model restore callback not set");
         return false;
       }
 
@@ -847,8 +789,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       setHasUnsavedChanges(false);
 
       return true;
-    } catch (error) {
-      console.error("Failed to restore to commit:", error);
+    } catch {
       return false;
     }
   }, [commits, onModelRestore, currentModel, modelName]);
@@ -862,7 +803,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     try {
       const commit = commits.find(c => c.id === commitId);
       if (!commit) {
-        console.error("Commit not found:", commitId);
         toast.error("Commit not found");
         return false;
       }
@@ -874,14 +814,12 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         const storedFile = await desktopAPI.readCommitFile(currentModel, commitId);
         if (storedFile) {
           fileBuffer = storedFile;
-          console.log('Using file buffer from 0studio folder:', fileBuffer.byteLength, 'bytes');
         }
       }
 
       // Priority 2: Fall back to in-memory file buffer (for backwards compatibility)
       if (!fileBuffer && commit.fileBuffer) {
         fileBuffer = commit.fileBuffer;
-        console.log('Using in-memory file buffer from commit:', fileBuffer.byteLength, 'bytes');
       }
 
       // Priority 3: Fall back to IndexedDB (for backwards compatibility)
@@ -889,7 +827,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         const storedBuffer = await getFileBuffer(commitId, currentModel);
         if (storedBuffer) {
           fileBuffer = storedBuffer;
-          console.log('Using file buffer from IndexedDB:', fileBuffer.byteLength, 'bytes');
         }
       }
       
@@ -897,28 +834,21 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       if (!fileBuffer && commit.modelData) {
         try {
           fileBuffer = await exportModelToBuffer(commit.modelData);
-          console.warn('Warning: Using exported model data (may not be exact file):', fileBuffer.byteLength, 'bytes');
           toast.warning("Note: Using converted model data - may differ from original file");
-        } catch (exportError) {
-          console.error('Failed to export model data to buffer:', exportError);
+        } catch {
           toast.error("Failed to convert model data to file");
           return false;
         }
       }
-      
+
       // If we still don't have a file buffer, we can't proceed
       if (!fileBuffer) {
-        console.error('No file data available for commit:', commitId, {
-          hasFileBuffer: !!commit.fileBuffer,
-          hasModelData: !!commit.modelData,
-        });
         toast.error("No file data available for this commit. The commit may have been created before file buffer storage was implemented.");
         return false;
       }
 
       // Write the exact file buffer to disk
       await desktopAPI.writeFileBuffer(currentModel, fileBuffer);
-      console.log('Exact file written to disk:', currentModel, fileBuffer.byteLength, 'bytes');
 
       // Touch the file to ensure Rhino detects the change
       // Read and immediately write to update file metadata
@@ -927,7 +857,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       if (verifyBuffer && verifyBuffer.byteLength === fileBuffer.byteLength) {
         // File was written correctly, touch it again to trigger Rhino reload
         await desktopAPI.writeFileBuffer(currentModel, fileBuffer);
-        console.log('File touched again to trigger Rhino reload');
       }
 
       // Wait for file system to settle
@@ -970,7 +899,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       toast.success("File updated to exact commit version - Rhino should auto-reload");
       return true;
     } catch (error) {
-      console.error("Failed to pull from commit:", error);
       toast.error(error instanceof Error ? error.message : "Failed to pull from commit");
       return false;
     }
@@ -990,10 +918,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     if (modelToSave && (branches.length > 0 || commits.length > 0)) {
       try {
         await saveTreeFile(modelToSave);
-        console.log('Saved tree.json before clearing model');
-      } catch (error) {
-        // Don't throw - just log, as we're closing anyway
-        console.warn('Failed to save tree.json before clearing (non-critical):', error);
+      } catch {
+        // Silent catch
       }
     }
     
@@ -1025,7 +951,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     if (!desktopAPI.isDesktop) return;
 
     const handleProjectClosed = async () => {
-      console.log('Project closed event received, clearing model and resetting gallery mode');
       await clearCurrentModel();
     };
 
@@ -1105,10 +1030,9 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const switchBranch = useCallback((branchId: string) => {
     const branch = branches.find(b => b.id === branchId);
     if (!branch) {
-      console.error('Branch not found:', branchId);
       return;
     }
-    
+
     const previousActiveId = activeBranchId;
     if (previousActiveId && previousActiveId !== branchId) {
       setPreviouslyWorkingBranchId(previousActiveId);
@@ -1130,8 +1054,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setCurrentCommitId(branch.headCommitId);
     updatePresenceCommit(branch.headCommitId);
     setPulledCommitId(null);
-
-    console.log(`Switched to branch: ${branch.name}`);
   }, [branches, activeBranchId]);
 
   const keepBranch = useCallback((branchId: string) => {
@@ -1139,7 +1061,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     
     const branchToKeep = branches.find(b => b.id === branchId);
     if (!branchToKeep) {
-      console.error('Branch not found:', branchId);
       return;
     }
     
@@ -1172,7 +1093,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     saveCommitsToStorage(currentModel, commits, updatedBranches);
     
     toast.success(`Branch "${branchToKeep.name}" is now the main branch`);
-    console.log(`Kept branch: ${branchToKeep.name}`);
   }, [branches, commits, currentModel, saveCommitsToStorage]);
 
   const getBranchCommits = useCallback((branchId: string): ModelCommit[] => {
@@ -1261,8 +1181,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           }
           return updated;
         });
-      } catch (error) {
-        console.error('Failed to load starred commits:', error);
+      } catch {
+        // Silent catch
       }
     }
   }, [currentModel, saveCommitsToStorage]);
@@ -1282,8 +1202,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         remoteCommitIds
       );
       setCloudSyncStatus(status);
-    } catch (error) {
-      console.warn('Failed to refresh cloud status:', error);
+    } catch {
+      // Silent catch
     }
   }, [cloudProject, commits]);
 
@@ -1325,12 +1245,10 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         }
 
         if (!fileBuffer) {
-          console.warn(`Skipping commit ${commitId} — no file buffer available`);
           continue;
         }
 
         await cloudSyncService.pushCommitFile(cloudProject.id, commitId, fileBuffer);
-        console.log(`Pushed commit file: ${commitId} (${fileBuffer.byteLength} bytes)`);
       }
 
       // Update synced IDs
@@ -1366,14 +1284,12 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       };
 
       await cloudSyncService.pushTreeJson(cloudProject.id, treeData);
-      console.log('Pushed tree.json to cloud');
 
       // Refresh status
       await refreshCloudStatus();
 
       toast.success(`Pushed ${unsyncedCommitIds.length} commit(s) to cloud`);
     } catch (error) {
-      console.error('Push to cloud failed:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to push to cloud');
     } finally {
       setIsCloudSyncing(false);
@@ -1418,9 +1334,8 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
             await desktopAPI.saveCommitFile(currentModel, commitId, fileBuffer);
           }
 
-          console.log(`Pulled commit file: ${commitId} (${fileBuffer.byteLength} bytes)`);
-        } catch (error) {
-          console.error(`Failed to pull commit ${commitId}:`, error);
+        } catch {
+          // Silent catch
         }
       }
 
@@ -1488,7 +1403,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
 
       toast.success(`Pulled ${remoteOnlyCommitIds.length} commit(s) from cloud`);
     } catch (error) {
-      console.error('Pull from cloud failed:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to pull from cloud');
     } finally {
       setIsCloudSyncing(false);

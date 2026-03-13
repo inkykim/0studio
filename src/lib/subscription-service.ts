@@ -11,7 +11,6 @@ export async function checkSubscriptionStatus(): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
     
     if (!user) {
-      console.log('No authenticated user found');
       return false;
     }
 
@@ -19,7 +18,6 @@ export async function checkSubscriptionStatus(): Promise<boolean> {
     const { data: { session } } = await supabase.auth.getSession();
     
     if (!session) {
-      console.log('No active session found');
       return false;
     }
 
@@ -33,16 +31,14 @@ export async function checkSubscriptionStatus(): Promise<boolean> {
     });
 
     if (!response.ok) {
-      console.error('Failed to fetch subscription status:', response.statusText);
       return false;
     }
 
     const data = await response.json();
-    
+
     // 4. Return true only if user has an active subscription
     return data.hasActivePlan === true && data.status === 'active';
-  } catch (error) {
-    console.error('Error checking subscription status:', error);
+  } catch {
     return false;
   }
 }
@@ -72,13 +68,11 @@ export async function getSubscriptionDetails(): Promise<{
     });
 
     if (!response.ok) {
-      console.error('Failed to fetch subscription details:', response.statusText);
       return null;
     }
 
     return await response.json();
-  } catch (error) {
-    console.error('Error fetching subscription details:', error);
+  } catch {
     return null;
   }
 }

@@ -140,7 +140,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   // Set up model restore callback for version control
   useEffect(() => {
     const handleModelRestore = (modelData: LoadedModel) => {
-      console.log('Restoring model from version control:', modelData);
       setLoadedModel(modelData);
       // Stats will be recalculated by SceneStatsCalculator in ModelViewer
     };
@@ -153,8 +152,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     if (!desktopAPI.isDesktop) return;
 
     const handleProjectOpened = async (project: { filePath: string; fileName: string }) => {
-      console.log('Project opened via native dialog:', project);
-      
       // Check authentication
       const { data: { user } } = await supabase.auth.getUser();
       
@@ -186,8 +183,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         setCurrentFile(filePath);
         setFileName(project.fileName);
 
-        console.log('Set current file for watching:', filePath);
-
         // Load branches/commits from 0studio_{filename}/ folder BEFORE createInitialCommit
         // This ensures existing version history is restored when opening from recent projects
         await setCurrentModel(filePath);
@@ -196,7 +191,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
 
         // Create initial commit for version control with exact file buffer (only if no commits exist)
         await createInitialCommit(result, arrayBuffer, filePath);
-        console.log('Created initial commit for model opened via native dialog');
 
         // Add to recent projects (Electron provides full path)
         addRecentProject(filePath, project.fileName);
@@ -204,7 +198,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         toast.success('Model imported successfully');
 
       } catch (err) {
-        console.error('Failed to load 3DM file:', err);
         setError(err instanceof Error ? err.message : 'Failed to load file');
         toast.error('Failed to import model', {
           description: err instanceof Error ? err.message : "An error occurred",
@@ -227,13 +220,10 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     if (!desktopAPI.isDesktop) return;
 
     const handleFileChange = (event: any) => {
-      console.log('3DM file changed on disk:', event);
-      
       if (event.eventType === 'change' && event.filePath && event.filePath === currentFile) {
         // File was modified - reload the model automatically
         const changeTime = new Date().toLocaleTimeString();
         setLastFileChangeTime(changeTime);
-        console.log(`Model file changed at ${changeTime}`);
         
         reloadModelFromDisk();
       }
@@ -251,7 +241,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const reloadModelFromDisk = useCallback(async () => {
     if (!currentFile) return;
 
-    console.log('Reloading model from disk:', currentFile);
     setIsLoading(true);
     setError(null);
 
@@ -260,7 +249,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         // In Electron, read the file using IPC
         const arrayBuffer = await desktopAPI.readFileBuffer(currentFile);
         if (!arrayBuffer) {
-          console.warn('Failed to read file buffer');
           return;
         }
         
@@ -271,11 +259,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         const result = await load3dmFile(file);
         setLoadedModel(result);
         // Stats will be recalculated by SceneStatsCalculator in ModelViewer
-        
-        console.log('Model successfully reloaded from disk with updated geometry');
-      } else {
-        // In browser mode, we can't reload from disk
-        console.log('Model file was updated externally (browser mode - cannot reload)');
       }
       
       // Mark as having unsaved changes
@@ -284,7 +267,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       }
       
     } catch (err) {
-      console.error("Failed to reload model from disk:", err);
       setError(err instanceof Error ? err.message : "Failed to reload model");
     } finally {
       setIsLoading(false);
@@ -505,20 +487,12 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       setCurrentFile(filePath);
       setFileName(file.name);
       
-      // Note: File watching requires a real file path, which is only available
-      // when opening via Electron's native dialog. Browser mode doesn't support watching.
-      if (desktopAPI.isDesktop) {
-        console.log('File imported via browser input - file watching requires native dialog for full path');
-      }
-
       // Create initial commit for version control with exact file buffer
       await createInitialCommit(result, fileBuffer, filePath);
-      console.log('Created initial commit for imported model with file buffer:', fileBuffer.byteLength, 'bytes');
       
       toast.success('Model imported successfully');
       
     } catch (err) {
-      console.error("Failed to load 3DM file:", err);
       setError(err instanceof Error ? err.message : "Failed to load file");
       toast.error('Failed to import model', {
         description: err instanceof Error ? err.message : "An error occurred",
@@ -543,7 +517,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         "scene_export.3dm";
       await exportTo3dm(sceneRef.current, exportFilename);
     } catch (err) {
-      console.error("Failed to export:", err);
       setError(err instanceof Error ? err.message : "Failed to export file");
     } finally {
       setIsExporting(false);
@@ -555,9 +528,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     if (desktopAPI.isDesktop) {
       try {
         await desktopAPI.stopFileWatching();
-        console.log('Stopped watching file');
-      } catch (err) {
-        console.warn('Failed to stop file watching:', err);
+      } catch {
+        // Silent catch
       }
     }
     

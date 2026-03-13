@@ -38,8 +38,8 @@ function loadFromStorage(userId: string | null): RecentProject[] {
       const parsed = JSON.parse(stored) as RecentProject[];
       return Array.isArray(parsed) ? parsed : [];
     }
-  } catch (e) {
-    console.warn("Failed to load recent projects:", e);
+  } catch {
+    // Silent catch
   }
   return [];
 }
@@ -48,8 +48,8 @@ function saveToStorage(projects: RecentProject[], userId: string | null) {
   if (!userId) return;
   try {
     localStorage.setItem(storageKey(userId), JSON.stringify(projects));
-  } catch (e) {
-    console.warn("Failed to save recent projects:", e);
+  } catch {
+    // Silent catch
   }
 }
 

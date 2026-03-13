@@ -6,7 +6,6 @@ import { PostgrestError } from '@supabase/supabase-js';
 // Helper function for consistent error handling
 function handleSupabaseError(error: PostgrestError | null, defaultMessage: string): never {
   if (error) {
-    console.error(`Supabase error (${defaultMessage}):`, error);
     const message = error.message || defaultMessage;
     toast.error(message);
     throw new Error(message);
@@ -71,12 +70,10 @@ export class SupabaseAPI {
         .single();
 
       if (error) {
-        console.error('Error fetching project:', error);
         return null;
       }
       return data;
-    } catch (error) {
-      console.error('Unexpected error fetching project:', error);
+    } catch {
       return null;
     }
   }
@@ -182,12 +179,10 @@ export class SupabaseAPI {
         .single();
 
       if (error) {
-        console.error('Error fetching commit:', error);
         return null;
       }
       return data;
-    } catch (error) {
-      console.error('Unexpected error fetching commit:', error);
+    } catch {
       return null;
     }
   }
@@ -270,12 +265,10 @@ export class SupabaseAPI {
         .single();
 
       if (error) {
-        console.error('Error fetching branch:', error);
         return null;
       }
       return data;
-    } catch (error) {
-      console.error('Unexpected error fetching branch:', error);
+    } catch {
       return null;
     }
   }
@@ -293,12 +286,10 @@ export class SupabaseAPI {
         .single();
 
       if (error) {
-        console.error('Error fetching branch:', error);
         return null;
       }
       return data;
-    } catch (error) {
-      console.error('Unexpected error fetching branch:', error);
+    } catch {
       return null;
     }
   }

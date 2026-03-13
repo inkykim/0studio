@@ -161,7 +161,6 @@ function WelcomePanel({
       // Open the downloaded file
       await desktopAPI.openProjectByPath(savePath);
     } catch (error: any) {
-      console.error('Error downloading shared project:', error);
       toast.error(error.message || 'Failed to download project', { id: 'shared-download' });
     } finally {
       setDownloadingProjectId(null);
@@ -443,20 +442,16 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
   const orbitControls = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
 
   useLayoutEffect(() => {
-    console.log(`LoadedObjects effect triggered with ${objects.length} objects`);
-    
     if (groupRef.current && objects.length > 0) {
       // Clear existing children
       while (groupRef.current.children.length > 0) {
         groupRef.current.remove(groupRef.current.children[0]);
       }
 
-      console.log("Adding objects to scene...");
-      
       // Add new objects
-      objects.forEach((obj, index) => {
+      objects.forEach((obj) => {
         const clonedObj = obj.clone();
-        
+
         // Make sure materials are visible
         clonedObj.traverse((child) => {
           if (child instanceof THREE.Mesh) {
@@ -467,19 +462,15 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
                 const c = mat.color;
                 if (c.r < 0.1 && c.g < 0.1 && c.b < 0.1) {
                   mat.color.setHex(0xaaaaaa);
-                  console.log(`Fixed black material on ${child.name}`);
                 }
               }
               mat.needsUpdate = true;
             }
           }
         });
-        
-        groupRef.current!.add(clonedObj);
-        console.log(`Added object ${index}: ${obj.name || 'unnamed'}, type: ${obj.type}`);
-      });
 
-      console.log(`Total objects in group: ${groupRef.current.children.length}`);
+        groupRef.current!.add(clonedObj);
+      });
 
       // Preserve original position, rotation, and scale from Rhino
       // Do NOT reset transforms - this preserves the exact orientation as in Rhino
@@ -493,13 +484,6 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
       if (!box.isEmpty()) {
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
-        
-        console.log(`File: ${objects[0]?.userData?.fileName || 'Unknown'}`);
-        console.log(`Bounding box - min: (${box.min.x.toFixed(2)}, ${box.min.y.toFixed(2)}, ${box.min.z.toFixed(2)})`);
-        console.log(`Bounding box - max: (${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`);
-        console.log(`Bounding box - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
-        console.log(`Bounding box - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
-        console.log(`Model orientation preserved from Rhino - no transforms applied`);
 
         // Calculate model scale for grid adjustment
         const maxDim = Math.max(size.x, size.y, size.z);
@@ -516,16 +500,7 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
         // Position camera to fit the model in view, looking at the model's center
         // This preserves the original orientation while ensuring the model is visible
         fitCameraToModel(camera as THREE.PerspectiveCamera, box, orbitControls, center);
-        
-        console.log(`Camera positioned at: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
-        console.log(`Camera target (model center): (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
-      } else {
-        console.warn("Bounding box is empty!");
       }
-      
-      console.log("Objects successfully added and centered");
-    } else {
-      console.log("No objects to display or group ref not ready");
     }
   }, [objects, camera, controls]);
 
@@ -541,18 +516,15 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
   
   useLayoutEffect(() => {
     if (!groupRef.current) return;
-    
-    console.log(`GeneratedObjects effect triggered with ${objects.length} objects`);
-    
+
     // Clear existing children
     while (groupRef.current.children.length > 0) {
       groupRef.current.remove(groupRef.current.children[0]);
     }
     
     // Add all generated objects
-    objects.forEach((genObj, index) => {
+    objects.forEach((genObj) => {
       groupRef.current!.add(genObj.object);
-      console.log(`Added generated object ${index}: ${genObj.object.name || 'unnamed'}`);
     });
     
     if (objects.length > 0) {
@@ -566,11 +538,7 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
       
       if (!box.isEmpty()) {
         const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        
-        console.log(`Generated objects - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
-        console.log(`Generated objects - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
-        
+
         // Move group so its center is at origin
         groupRef.current.position.set(-center.x, -center.y, -center.z);
         
@@ -586,8 +554,6 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
         
         // Position camera to fit the model in view (no scaling - let camera handle fit)
         fitCameraToModel(camera as THREE.PerspectiveCamera, centeredBox, orbitControls, centeredCenter);
-        
-        console.log(`Camera positioned for generated objects at: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
       }
     }
     
@@ -669,53 +635,36 @@ function SceneStatsCalculator({
 
       // Count objects from the loaded model
       if (modelObjects && modelObjects.length > 0) {
-        const objectDetails: string[] = [];
-        
         modelObjects.forEach((obj) => {
           obj.traverse((child) => {
             // Get the original Rhino object type from userData
             const objectType = child.userData?.objectType as string | undefined;
-            
+
             if (objectType) {
               switch (objectType) {
                 case 'Curve':
                   curves++;
-                  objectDetails.push(`Curve: ${child.name || 'unnamed'}`);
                   break;
                 case 'Mesh':
                   // A single mesh is a surface
                   surfaces++;
-                  objectDetails.push(`Surface (Mesh): ${child.name || 'unnamed'}`);
                   break;
                 case 'Brep':
                   // Breps are polysurfaces (boundary representations)
                   polysurfaces++;
-                  objectDetails.push(`Polysurface (Brep): ${child.name || 'unnamed'}`);
                   break;
                 case 'Extrusion':
                   // Extrusions are also polysurfaces
                   polysurfaces++;
-                  objectDetails.push(`Polysurface (Extrusion): ${child.name || 'unnamed'}`);
                   break;
                 case 'SubD':
                   // SubD surfaces count as surfaces
                   surfaces++;
-                  objectDetails.push(`Surface (SubD): ${child.name || 'unnamed'}`);
                   break;
-                default:
-                  // Log unknown types for debugging
-                  if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
-                    console.log(`Unknown objectType: ${objectType}`);
-                  }
               }
             }
           });
         });
-        
-        // Log once when model changes
-        if (objectDetails.length > 0) {
-          console.log("Model breakdown:", objectDetails);
-        }
       }
 
       // Count generated objects as polysurfaces (AI-generated primitives are solid shapes)
@@ -863,8 +812,8 @@ export const ModelViewer = () => {
             const loaded = await load3dmFile(file);
             newModelData.set(commit.id, loaded);
           }
-        } catch (error) {
-          console.error(`Failed to load model data for commit ${commit.id}:`, error);
+        } catch {
+          // Silent catch
         }
       }
       

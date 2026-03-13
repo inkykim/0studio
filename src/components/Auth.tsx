@@ -138,13 +138,9 @@ function GoogleSignInButton({ onSuccess }: { onSuccess: () => void }) {
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     try {
-      const { error } = await signInWithGoogle();
-      if (!error) {
-        // OAuth will redirect, so we don't need to call onSuccess here
-        // The user will return to the app after OAuth flow
-      }
-    } catch (error) {
-      console.error('Google sign-in error:', error);
+      await signInWithGoogle();
+    } catch {
+      // Silent catch
     } finally {
       // Don't set loading to false on success as we're redirecting
       // Only set it to false if there's an error
@@ -204,9 +200,8 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
         form.setError('root', { message: error.message });
       }
     } catch (error) {
-      console.error('Login error:', error);
-      form.setError('root', { 
-        message: error instanceof Error ? error.message : 'An unexpected error occurred' 
+      form.setError('root', {
+        message: error instanceof Error ? error.message : 'An unexpected error occurred'
       });
     } finally {
       setIsLoading(false);
@@ -280,9 +275,8 @@ function SignupForm({ onSuccess }: { onSuccess: () => void }) {
         form.setError('root', { message: error.message });
       }
     } catch (error) {
-      console.error('Signup error:', error);
-      form.setError('root', { 
-        message: error instanceof Error ? error.message : 'An unexpected error occurred' 
+      form.setError('root', {
+        message: error instanceof Error ? error.message : 'An unexpected error occurred'
       });
     } finally {
       setIsLoading(false);
@@ -374,9 +368,8 @@ export function ResetPasswordDialog() {
         form.setError('root', { message: error.message });
       }
     } catch (error) {
-      console.error('Reset password error:', error);
-      form.setError('root', { 
-        message: error instanceof Error ? error.message : 'An unexpected error occurred' 
+      form.setError('root', {
+        message: error instanceof Error ? error.message : 'An unexpected error occurred'
       });
     } finally {
       setIsLoading(false);
@@ -447,8 +440,8 @@ export function UserMenu() {
     setIsLoading(true);
     try {
       await signOut();
-    } catch (error) {
-      console.error('Sign out error:', error);
+    } catch {
+      // Silent catch
     } finally {
       setIsLoading(false);
     }

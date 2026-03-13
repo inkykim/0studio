@@ -61,9 +61,7 @@ export async function storeFileBuffer(
       request.onerror = () => reject(request.error);
     });
 
-    console.log(`Stored file buffer for commit ${commitId} (${buffer.byteLength} bytes)`);
-  } catch (error) {
-    console.error('Failed to store file buffer in IndexedDB:', error);
+  } catch {
     // Don't throw - this is not critical, we can still work without it
   }
 }
@@ -85,7 +83,6 @@ export async function getFileBuffer(
       request.onsuccess = () => {
         const record = request.result as FileBufferRecord | undefined;
         if (record) {
-          console.log(`Retrieved file buffer for commit ${commitId} (${record.buffer.byteLength} bytes)`);
           resolve(record.buffer);
         } else {
           resolve(null);
@@ -93,8 +90,7 @@ export async function getFileBuffer(
       };
       request.onerror = () => reject(request.error);
     });
-  } catch (error) {
-    console.error('Failed to retrieve file buffer from IndexedDB:', error);
+  } catch {
     return null;
   }
 }
@@ -122,8 +118,8 @@ export async function deleteFileBuffers(filePath: string): Promise<void> {
       };
       request.onerror = () => reject(request.error);
     });
-  } catch (error) {
-    console.error('Failed to delete file buffers:', error);
+  } catch {
+    // Silent catch
   }
 }
 
@@ -151,7 +147,7 @@ export async function cleanupOldFileBuffers(daysToKeep: number = 30): Promise<vo
       };
       request.onerror = () => reject(request.error);
     });
-  } catch (error) {
-    console.error('Failed to cleanup old file buffers:', error);
+  } catch {
+    // Silent catch
   }
 }

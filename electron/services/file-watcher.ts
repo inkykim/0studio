@@ -19,10 +19,7 @@ export class FileWatcherService {
       this.stop();
     }
 
-    console.log(`Starting to watch file: ${filePath}`);
-
     if (!existsSync(filePath)) {
-      console.error(`File does not exist: ${filePath}`);
       callback('error', 'File does not exist');
       return;
     }
@@ -55,7 +52,6 @@ export class FileWatcherService {
         this.debounceTimer = setTimeout(() => {
           // Check if file still exists
           if (!existsSync(filePath)) {
-            console.log(`File deleted: ${filePath}`);
             callback('unlink', filePath);
             return;
           }
@@ -65,27 +61,22 @@ export class FileWatcherService {
             const currentModified = statSync(filePath).mtimeMs;
             if (currentModified > this.lastModified) {
               this.lastModified = currentModified;
-              console.log(`File changed: ${filePath}`);
               callback('change', filePath);
             }
-          } catch (e) {
+          } catch {
             // File might have been deleted during check
-            console.log(`File access error: ${filePath}`);
             callback('error', 'File access error');
           }
         }, 500); // 500ms debounce for file write completion
       });
 
       this.watcher.on('error', (error) => {
-        console.error(`Watcher error: ${error}`);
         callback('error', error instanceof Error ? error.message : String(error));
       });
 
       this.isWatching = true;
-      console.log(`File watcher ready for: ${filePath}`);
-      
+
     } catch (error) {
-      console.error(`Failed to start watcher: ${error}`);
       callback('error', error instanceof Error ? error.message : String(error));
     }
   }
@@ -100,7 +91,6 @@ export class FileWatcherService {
     }
     
     if (this.watcher) {
-      console.log('Stopping file watcher');
       this.watcher.close();
       this.watcher = null;
       this.isWatching = false;

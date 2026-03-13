@@ -66,7 +66,6 @@ function CheckoutForm({ planName, planPrice, onSuccess, onCancel }: CheckoutForm
         onSuccess();
       }
     } catch (err) {
-      console.error('Payment error:', err);
       setErrorMessage('An unexpected error occurred. Please try again.');
       setIsProcessing(false);
     }
@@ -193,7 +192,6 @@ export default function Checkout() {
         const data = await response.json();
         setClientSecret(data.clientSecret);
       } catch (err) {
-        console.error('Error creating subscription:', err);
         setError(err instanceof Error ? err.message : 'Failed to initialize checkout');
       } finally {
         setLoading(false);

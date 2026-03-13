@@ -22,42 +22,21 @@ function getLoader(): Rhino3dmLoader {
 export async function load3dmFile(
   file: File
 ): Promise<{ objects: THREE.Object3D[]; metadata: Rhino3dmMetadata }> {
-  console.log(`Starting to load 3DM file: ${file.name}`);
-  
   const loader = getLoader();
   const buffer = await file.arrayBuffer();
-  
-  console.log(`File loaded: ${buffer.byteLength} bytes`);
 
   return new Promise((resolve, reject) => {
     loader.parse(
       buffer,
       (object) => {
-        console.log("Successfully parsed 3DM file");
-        console.log(`Root object type: ${object.type}`);
-        console.log(`Children count: ${object.children.length}`);
-        
-        // Log warnings if any
-        if (object.userData.warnings && object.userData.warnings.length > 0) {
-          console.warn("Warnings during parsing:", object.userData.warnings);
-        }
-
-        // Log detailed object info
+        // Count objects
         let meshCount = 0;
         let lineCount = 0;
         let pointsCount = 0;
-        
+
         object.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             meshCount++;
-            console.log(`Found Mesh: ${child.name || 'unnamed'}`);
-            
-            // Log geometry info
-            if (child.geometry) {
-              const pos = child.geometry.attributes.position;
-              console.log(`  - Vertices: ${pos ? pos.count : 0}`);
-            }
-            
             // Ensure materials are properly set up
             if (child.material) {
               const mat = child.material as THREE.Material;
@@ -73,18 +52,10 @@ export async function load3dmFile(
             }
           } else if (child instanceof THREE.Line) {
             lineCount++;
-            console.log(`Found Line: ${child.name || 'unnamed'}`);
           } else if (child instanceof THREE.Points) {
             pointsCount++;
-            console.log(`Found Points: ${child.name || 'unnamed'}`);
           }
         });
-
-        console.log(`\n=== SUMMARY ===`);
-        console.log(`Meshes: ${meshCount}`);
-        console.log(`Lines: ${lineCount}`);
-        console.log(`Points: ${pointsCount}`);
-        console.log(`===============\n`);
 
         // Convert from Rhino's Z-up coordinate system to Three.js Y-up
         // Rhino: X=right, Y=forward, Z=up (model bottom at negative Z)
@@ -107,7 +78,6 @@ export async function load3dmFile(
         resolve({ objects, metadata });
       },
       (error) => {
-        console.error("Failed to parse 3DM file:", error);
         reject(error);
       }
     );
@@ -304,8 +274,7 @@ function threeMeshToRhinoMesh(rhino: any, threeMesh: THREE.Mesh): any | null {
     rhinoMesh.compact();
 
     return rhinoMesh;
-  } catch (error) {
-    console.error("Error converting Three.js mesh to Rhino:", error);
+  } catch {
     return null;
   }
 }
