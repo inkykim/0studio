@@ -26,12 +26,14 @@ Priya Sharma      priya.sharma@studio.com      uuid: ...
 ...
 ```
 
+Fake users set `displayName` to their human-readable name (e.g., "Sarah Chen") rather than the email-derived form (e.g., "sarah.chen"). The real app derives `displayName` by splitting email on `@`, but for simulation realism, pretty names look better in the Electron UI. This is purely cosmetic — the tracked state accepts any string.
+
 The `PresenceUser` state tracked per fake user:
 ```typescript
 {
   userId: string;        // hardcoded UUID
   email: string;         // fake email
-  displayName: string;   // first part of email
+  displayName: string;   // human-readable name (e.g., "Sarah Chen")
   color: string;         // deterministic from userId
   currentCommitId: string | null;
   statusMessage: string;
@@ -45,7 +47,7 @@ The `PresenceUser` state tracked per fake user:
 
 1. **Sign in** — minimal Supabase auth form (email/password). Uses the same Supabase project URL and anon key as the main app. A real account is needed to call the backend API for fetching tree.json.
 
-2. **Enter project ID** — text field for `cloudProject.id`. The dashboard calls `POST /api/projects/:projectId/sync/pull-url` with `file_key: "tree.json"` to get a presigned download URL, fetches tree.json, and parses the commit tree to extract all commit IDs.
+2. **Enter project ID** — text field for `cloudProject.id`. The dashboard calls `POST /api/projects/:projectId/sync/pull-url` with body `{ file_key: "tree.json" }`. The response is `{ download_url, s3_key }`. Fetch `download_url` to get the raw tree.json content, then parse it to extract commit IDs. Show inline error messages for auth failure, invalid project ID (403), or missing tree.json (404).
 
 3. **Ready state** — roster populates with 20 offline fake users; commit dropdowns populate with real commit IDs from the tree; scenario runner is enabled.
 
@@ -91,7 +93,7 @@ A list of pre-built scenarios, each with a name, description, and "Run" button:
 **Crowded Commit**
 - 6 users join and all navigate to the same commit within 10 seconds
 - After 15 seconds, 2 users drift to adjacent commits over 30 seconds
-- Tests the CommitPresenceAvatars overflow badge (+N) and tooltip stacking
+- Tests the CommitPresenceAvatars overflow badge (+N) and tooltip stacking (the component shows 3 avatars then a +N badge, so 6 fake users produces 3 faces + "+3")
 - Duration: ~1 minute
 
 **Active Collaboration**
@@ -147,7 +149,12 @@ interface Scenario {
 }
 ```
 
-The runner iterates through actions sequentially, awaiting each `delayMs` before executing. Actions that reference commits use identifiers like `"latest"`, `"random"`, or `"same_as:sarah"` which the runner resolves against the fetched commit tree at runtime.
+The runner iterates through actions sequentially, awaiting each `delayMs` before executing. Actions that reference commits use symbolic identifiers resolved at runtime:
+- `"latest"` — the `headCommitId` of the main branch in tree.json
+- `"random"` — a random commit ID from the full commit list in tree.json
+- `"same_as:{userId}"` — whatever `currentCommitId` the named fake user currently has
+
+Tree.json structure (relevant fields): `{ commits: [{ id, parentCommitId, branchId, ... }], branches: [{ id, name, headCommitId, isMain, ... }], currentCommitId }`. The implementer can reference `src/contexts/VersionControlContext.tsx` (the `TreeData` type and `loadTreeFromDisk` logic) for the full schema.
 
 A `ScenarioRunner` class manages execution:
 - `run(scenario)` — starts execution, returns a cancel handle
@@ -168,33 +175,26 @@ src/dev/
   sim-channel-manager.ts      — manages multiple Supabase channel subscriptions
 ```
 
-### Vite Configuration
+### Vite Dev Server
 
-Add `src/dev/presence-sim.html` as an additional entry point in `vite.config.ts` using Vite's multi-page app support:
-
-```typescript
-build: {
-  rollupOptions: {
-    input: {
-      main: 'index.html',
-      'presence-sim': 'src/dev/presence-sim.html',
-    },
-  },
-},
-```
-
-The page is accessible at `http://localhost:5173/src/dev/presence-sim.html` during `npm run dev`. It is excluded from the production Electron build by the existing `electron:dist` pipeline which only bundles the main entry point.
+No Vite config changes are needed. Vite's dev server automatically serves any HTML file from the project root. The dashboard is accessible at `http://localhost:5173/src/dev/presence-sim.html` during `npm run dev`. It is not included in production Electron builds since `electron:dist` only bundles the main entry point.
 
 ### Dependencies
 
 No new dependencies. Uses:
 - `@supabase/supabase-js` (already installed) — for Realtime channel subscriptions
 - Inline styles or a minimal CSS file — no Tailwind/Shadcn needed for a dev tool
-- The `colorForUser` hash function is copied from `src/lib/presence-service.ts` into `sim-users.ts` to avoid importing from the main app bundle
+- The `colorForUser` function and `PRESENCE_COLORS` array are copied from `src/lib/presence-service.ts` into `sim-users.ts` (both are module-private, not exported). Alternatively, export them from presence-service.ts and import directly — both files are bundled by Vite anyway.
 
 ### Supabase Client
 
 The dashboard creates its own Supabase client instance using the same project URL and anon key as the main app (imported from environment variables or hardcoded for dev). It does NOT share the Electron app's client instance.
+
+---
+
+## Known Limitations
+
+- **Supabase channel limits** — each fake user creates its own channel subscription. Supabase may throttle many concurrent subscriptions from a single client/IP. If issues arise, reduce the active pool to 10 users or stagger subscription creation with short delays.
 
 ---
 
