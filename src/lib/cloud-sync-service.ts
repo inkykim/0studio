@@ -1,20 +1,7 @@
 import { projectAPI, CloudProject } from './project-api';
+import { getAuthHeaders } from './auth-utils';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-
-async function getAuthHeaders(): Promise<HeadersInit> {
-  const { supabase } = await import('./supabase');
-  const { data: { session } } = await supabase.auth.getSession();
-
-  if (!session?.access_token) {
-    throw new Error('Not authenticated');
-  }
-
-  return {
-    'Authorization': `Bearer ${session.access_token}`,
-    'Content-Type': 'application/json',
-  };
-}
 
 export interface RemoteCommitInfo {
   id: string;
