@@ -27,6 +27,14 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
     return () => svc.leave();
   }, []);
 
+  // Leave channel when user signs out
+  useEffect(() => {
+    if (!user) {
+      serviceRef.current.leave();
+      setOnlineUsers([]);
+    }
+  }, [user]);
+
   const joinProject = useCallback((projectId: string) => {
     if (!user) return;
     serviceRef.current.join(projectId, { id: user.id, email: user.email ?? '' }, setOnlineUsers);
