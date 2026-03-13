@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { RecentProjectsProvider } from "@/contexts/RecentProjectsContext";
 import { ModelProvider } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
+import { PresenceProvider } from "@/contexts/PresenceContext";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
 import Checkout from "./pages/Checkout";
@@ -21,6 +22,7 @@ const App = () => (
       <RecentProjectsProvider>
         <HashRouter>
           <VersionControlProvider>
+            <PresenceProvider>
             <ModelProvider>
               <TooltipProvider>
                 <Toaster />
@@ -34,6 +36,7 @@ const App = () => (
                 </Routes>
               </TooltipProvider>
             </ModelProvider>
+            </PresenceProvider>
           </VersionControlProvider>
         </HashRouter>
       </RecentProjectsProvider>
