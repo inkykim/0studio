@@ -1514,7 +1514,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       leaveProject();
     }
     return () => leaveProject();
-  }, [cloudProject?.id]);
+  }, [cloudProject?.id, joinProject, leaveProject]);
 
   const value: VersionControlContextType = {
     currentModel,

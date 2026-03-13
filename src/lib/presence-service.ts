@@ -96,7 +96,9 @@ export class PresenceService {
 
   private async _track() {
     if (this.channel) {
-      await this.channel.track(this.myState);
+      await this.channel.track(this.myState).catch(() => {
+        // Presence broadcast failures are non-fatal; swallow silently
+      });
     }
   }
 
