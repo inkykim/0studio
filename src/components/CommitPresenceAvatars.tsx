@@ -22,9 +22,8 @@ export function CommitPresenceAvatars({ commitId }: Props) {
             <div
               className="w-4 h-4 rounded-full border border-background flex items-center justify-center text-[8px] font-bold text-white shrink-0 cursor-default"
               style={{ backgroundColor: u.color }}
-              title={u.displayName}
             >
-              {u.displayName[0].toUpperCase()}
+              {(u.displayName[0] ?? '?').toUpperCase()}
             </div>
           </TooltipTrigger>
           <TooltipContent side="top" className="text-xs">
