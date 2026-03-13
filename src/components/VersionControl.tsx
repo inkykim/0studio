@@ -9,6 +9,7 @@ import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3, ArrowLef
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { CommitPresenceAvatars } from '@/components/CommitPresenceAvatars';
+import { TeamPresencePanel } from '@/components/TeamPresencePanel';
 
 const formatTimeAgo = (timestamp: number) => {
   const now = Date.now();
@@ -629,6 +630,9 @@ export const VersionControl = () => {
               </div>
             </section>
           )}
+
+          {/* Team Presence */}
+          <TeamPresencePanel />
 
           {/* Version History */}
           <section>
