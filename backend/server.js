@@ -913,6 +913,43 @@ app.post('/api/projects/:projectId/sync/pull-url', verifyAuth, async (req, res) 
   }
 });
 
+// Download file content directly (for browser clients that can't fetch S3 presigned URLs due to CORS)
+app.post('/api/projects/:projectId/sync/pull-content', verifyAuth, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { file_key } = req.body;
+
+    if (!file_key) {
+      return res.status(400).json({ error: 'Missing file_key parameter' });
+    }
+
+    const permission = await checkProjectPermission(projectId, req.user.id, 'viewer', req.user.email);
+    if (!permission.allowed) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const s3Key = `projects/${projectId}/${file_key}`;
+
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: s3Key,
+    });
+
+    const response = await s3Client.send(command);
+    const body = await response.Body.transformToString();
+    res.setHeader('Content-Type', 'application/json');
+    res.send(body);
+  } catch (error) {
+    console.error('Error downloading sync file:', error);
+
+    if (error.name === 'NoSuchKey' || error.Code === 'NoSuchKey') {
+      return res.status(404).json({ error: 'File not found in cloud storage' });
+    }
+
+    res.status(500).json({ error: 'Failed to download file' });
+  }
+});
+
 // List all synced files for a project
 app.get('/api/projects/:projectId/sync/list', verifyAuth, async (req, res) => {
   try {

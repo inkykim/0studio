@@ -93,7 +93,7 @@ connectBtn.addEventListener('click', async () => {
     const token = session.data.session?.access_token;
     if (!token) throw new Error('No auth session');
 
-    const pullRes = await fetch(`${backendUrl}/api/projects/${projectId}/sync/pull-url`, {
+    const pullRes = await fetch(`${backendUrl}/api/projects/${projectId}/sync/pull-content`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -106,11 +106,7 @@ connectBtn.addEventListener('click', async () => {
     if (pullRes.status === 404) throw new Error('tree.json not found — has this project been synced to cloud?');
     if (!pullRes.ok) throw new Error(`Backend error: ${pullRes.status}`);
 
-    const { download_url } = await pullRes.json();
-
-    const treeRes = await fetch(download_url);
-    if (!treeRes.ok) throw new Error('Failed to download tree.json from S3');
-    const treeData = await treeRes.json();
+    const treeData = await pullRes.json();
 
     commitTree = {
       commits: (treeData.commits ?? []).map((c: any) => ({ id: c.id, branchId: c.branchId })),
