@@ -46,8 +46,9 @@ Comprehensive refactor of the 0studio codebase to close security gaps, remove de
 
 **Actions:**
 1. Apply rate limiter as global middleware on all `/api/*` routes (100 req / 15 min default)
-2. Add stricter limiter for auth-adjacent endpoints (e.g., invite acceptance) if needed
-3. Exempt `/api/stripe/webhook` (Stripe retries on failure, must not be rate-limited)
+2. Remove the existing per-route limiters on `/api/aws` and `/api/projects/:projectId/sync` (now redundant with the global limiter)
+3. Add stricter limiter for auth-adjacent endpoints (e.g., invite acceptance) if needed
+4. Exempt `/api/stripe/webhook` (Stripe retries on failure, must not be rate-limited)
 
 ### 1d. Orphaned Preload Handlers
 
@@ -113,7 +114,7 @@ Comprehensive refactor of the 0studio codebase to close security gaps, remove de
 
 ### 2e. Remove Console Statements
 
-**Problem:** ~500+ `console.log`/`console.error`/`console.warn` calls across production source files.
+**Problem:** ~400+ `console.log`/`console.error`/`console.warn` calls across production source files.
 
 **Actions:**
 1. Remove all console statements from production source files (`src/`, `electron/`, `backend/`)
@@ -192,7 +193,7 @@ backend/
 - Shared middleware and helpers imported from `middleware/auth.js` and `lib/utils.js`
 - No behavior changes — same API surface, same responses
 
-**Stripe webhook caveat:** The webhook route requires `express.raw()` for Stripe signature verification. When splitting into `routes/stripe.js`, the raw body parser must be applied to the webhook route _before_ `express.json()` parses it. Mount the stripe router first in `server.js` or use route-specific middleware within the router.
+**Stripe webhook caveat:** The webhook route requires `express.raw()` for Stripe signature verification. The global `express.json()` will consume the body before the stripe router sees it. To fix this, mount `app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }))` in `server.js` _before_ the global `app.use(express.json())` call.
 
 ### 3d. AWS SDK Version Alignment
 
@@ -225,7 +226,9 @@ Each commit should leave the app in a working state. Manual verification after e
 ### Modified
 - `electron/main.ts` — path validation (1b), listener cleanup pattern (1e)
 - `electron/preload.ts` — remove git handlers (1d), remove `removeAllListeners` (1e), unsubscribe pattern (1e)
-- `src/lib/desktop-api.ts` — remove git wrapper methods (1d), propagate unsubscribe pattern (1e)
+- `src/lib/desktop-api.ts` — remove git wrapper methods and types (1d), propagate unsubscribe pattern (1e)
+- `src/vite-env.d.ts` — update `removeAllListeners` type, update `on*` return types to unsubscribe functions (1e)
+- `src/contexts/ModelContext.tsx` — migrate `removeAllListeners` calls to per-handler unsubscribe (1e), console removal (2e)
 - `src/contexts/VersionControlContext.tsx` — decompose (3a), console removal (2e)
 - `src/components/ModelViewer.tsx` — extract WelcomePanel (3b), console removal (2e)
 - `src/components/VersionControl.tsx` — consume new CloudSyncContext and GalleryContext (3a), console removal (2e)
