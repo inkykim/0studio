@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Archive, Save, Star, Download, Search, FolderOpen, X, Grid3x3, ArrowLeft, Cloud, CloudUpload, CloudDownload, Loader2, Check } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { CommitPresenceAvatars } from '@/components/CommitPresenceAvatars';
 
 const formatTimeAgo = (timestamp: number) => {
   const now = Date.now();
@@ -344,6 +345,7 @@ const BranchingTree = ({
                     {cloudSyncedCommitIds.has(node.commit.id) && (
                       <Cloud className="w-3 h-3 text-blue-400 shrink-0" title="Synced to cloud" />
                     )}
+                    <CommitPresenceAvatars commitId={node.commit.id} />
                     <span className="text-code text-xs text-muted-foreground shrink-0">
                       {versionLabel}
                     </span>
