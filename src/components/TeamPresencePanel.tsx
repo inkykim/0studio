@@ -57,6 +57,28 @@ export function TeamPresencePanel() {
         </Button>
       </div>
 
+      {/* You */}
+      {me && (
+        <div className="flex items-center gap-2 py-0.5">
+          <div
+            className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+            style={{ backgroundColor: me.color }}
+          >
+            {(me.displayName[0] ?? '?').toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1">
+              <p className="text-xs font-medium truncate">{me.displayName}</p>
+              <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5">you</Badge>
+            </div>
+            {(saved || me.statusMessage) && (
+              <p className="text-[10px] text-muted-foreground truncate">{saved || me.statusMessage}</p>
+            )}
+          </div>
+          <div className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+        </div>
+      )}
+
       {/* Teammate list */}
       {teammates.length > 0 && (
         <div className="space-y-1">
