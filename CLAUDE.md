@@ -32,19 +32,27 @@ Three separate runtime processes:
 
 2. **Renderer / React** (`src/`) — Runs in the Electron BrowserWindow. Uses `HashRouter` (required for Electron's file:// protocol). Communicates with the main process exclusively through `window.electronAPI`.
 
-3. **Express backend** (`backend/server.js`) — Separate Node.js process. Handles AWS S3 presigned URLs, Stripe webhooks, and email invites via SES. The frontend calls this over HTTP at `localhost:3000`.
+3. **Express backend** (`backend/server.js`) — Separate Node.js process, split into route modules. The frontend calls this over HTTP at `localhost:3000`.
 
 ### IPC Bridge
 `electron/preload.ts` defines the `window.electronAPI` surface via `contextBridge`. The frontend wrapper is `src/lib/desktop-api.ts`. When adding new IPC channels: define handler in `electron/main.ts`, expose in `electron/preload.ts`, wrap in `src/lib/desktop-api.ts`.
 
+IPC event listeners (`on*` methods) return unsubscribe functions. Use the returned function in React effect cleanups instead of `removeAllListeners`.
+
 ### State Management
-Four React Contexts wrap the entire app (see nesting order in `src/App.tsx`):
+Seven React Contexts wrap the entire app (see nesting order in `src/App.tsx`):
 - **AuthContext** — Supabase auth session, payment plan, Google OAuth
 - **RecentProjectsContext** — Recent file list (persisted in localStorage)
-- **VersionControlContext** — Commit tree, branches, cloud sync state; the core domain logic
+- **PresenceContext** — Real-time team presence via Supabase Realtime
+- **VersionControlContext** — Commit tree, branches, core version control logic
+- **CloudSyncContext** — Cloud sync state and operations (push/pull to S3/Supabase)
+- **GalleryContext** — Gallery mode selection state (compare up to 4 versions)
 - **ModelContext** — Loaded 3D model geometry and Three.js scene state
 
-`VersionControlContext` is the most complex: it owns the commit tree (a JSON structure persisted locally via IPC to `.0studio/` inside the project folder), branch management, gallery mode (compare up to 4 versions), and cloud sync to S3/Supabase.
+`VersionControlContext` owns the commit tree (a JSON structure persisted locally via IPC to `.0studio/` inside the project folder) and branch management. Cloud sync and gallery mode are in their own contexts.
+
+### Shared Utilities
+- `src/lib/auth-utils.ts` — shared `getAuthHeaders()` for authenticated API calls (used by project-api and cloud-sync-service)
 
 ### Commit Storage (two layers)
 - **Local**: `.0studio/commits/<commitId>.3dm` + `.0studio/tree.json` written by `FileStorageService` in `electron/services/file-storage-service.ts` via IPC.
@@ -57,12 +65,14 @@ Four React Contexts wrap the entire app (see nesting order in `src/App.tsx`):
 
 Path alias `@/` maps to `src/` in all configs.
 
-### Backend endpoints
-All routes require a Supabase JWT in the `Authorization: Bearer` header except Stripe webhooks.
-- `GET  /api/s3/presigned-url` — upload URL for a commit file
-- `GET  /api/s3/download-url` — download URL for a commit file
-- `POST /api/stripe/webhook` — Stripe event handler (raw body required)
-- `GET  /api/stripe/payment-status` — check user subscription
-- `POST/GET /api/projects` — project CRUD
-- `POST/GET /api/invites/:projectId` — sharing invites
-- `POST /api/invites/:inviteId/accept` — accept invite (resolves pending invites on auth)
+### Backend structure
+The backend is split into modules:
+- `backend/server.js` — thin shell: client init, middleware, route mounting
+- `backend/middleware/auth.js` — `verifyAuth`, `validateS3Key`, `checkProjectPermission`
+- `backend/lib/utils.js` — `escapeHtml`, `resolvePendingInvites`, `sendProjectInviteEmail`, `ensureS3Cors`
+- `backend/routes/s3.js` — legacy per-user S3 presigned URL routes (`/api/aws`)
+- `backend/routes/projects.js` — project CRUD + member management (`/api/projects`)
+- `backend/routes/sync.js` — cloud sync routes (`/api/projects/:projectId/sync`)
+- `backend/routes/stripe.js` — Stripe payment + webhook routes (`/api/stripe`)
+
+Each route file exports a factory function that receives dependencies and returns an Express Router. All routes require a Supabase JWT in `Authorization: Bearer` except Stripe webhooks.
