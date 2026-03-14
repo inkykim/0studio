@@ -58,13 +58,6 @@ interface VersionControlContextType {
   getBranchCommits: (branchId: string) => ModelCommit[];
   getCommitVersionLabel: (commit: ModelCommit) => string; // Get version label like v3a, v3b
   
-  // Gallery mode
-  isGalleryMode: boolean;
-  selectedCommitIds: Set<string>;
-  toggleGalleryMode: () => void;
-  toggleCommitSelection: (commitId: string) => void;
-  clearSelectedCommits: () => void;
-  
   // Internal — exposed for CloudSyncContext
   previouslyWorkingBranchId: string | null;
   cloudSyncedCommitIdsRef: React.MutableRefObject<Set<string>>;
@@ -96,8 +89,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [currentCommitId, setCurrentCommitId] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [onModelRestore, setOnModelRestore] = useState<((modelData: LoadedModel) => void) | undefined>(undefined);
-  const [isGalleryMode, setIsGalleryMode] = useState(false);
-  const [selectedCommitIds, setSelectedCommitIds] = useState<Set<string>>(new Set());
   const [isLoadingTree, setIsLoadingTree] = useState(false);
   const [treeLoadPromise, setTreeLoadPromise] = useState<Promise<void> | null>(null);
   
@@ -893,9 +884,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setCurrentCommitId(null);
     updatePresenceCommit(null);
     setHasUnsavedChanges(false);
-    // Reset gallery mode when closing project
-    setIsGalleryMode(false);
-    setSelectedCommitIds(new Set());
     // Reset branching state
     setBranches([]);
     setActiveBranchId(null);
@@ -955,38 +943,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const getStarredCommits = useCallback((): ModelCommit[] => {
     return commits.filter(commit => commit.starred);
   }, [commits]);
-
-  // Gallery mode functions
-  const toggleGalleryMode = useCallback(() => {
-    setIsGalleryMode(prev => {
-      const newValue = !prev;
-      if (!newValue) {
-        // Clear selections when exiting gallery mode
-        setSelectedCommitIds(new Set());
-      }
-      return newValue;
-    });
-  }, []);
-
-  const toggleCommitSelection = useCallback((commitId: string) => {
-    setSelectedCommitIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(commitId)) {
-        // Allow deselecting even if at max
-        newSet.delete(commitId);
-      } else {
-        // Only allow adding if under the limit of 4
-        if (newSet.size < 4) {
-          newSet.add(commitId);
-        }
-      }
-      return newSet;
-    });
-  }, []);
-
-  const clearSelectedCommits = useCallback(() => {
-    setSelectedCommitIds(new Set());
-  }, []);
 
   // Branching functions
   const switchBranch = useCallback((branchId: string) => {
@@ -1175,12 +1131,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     keepBranch,
     getBranchCommits,
     getCommitVersionLabel,
-    // Gallery mode
-    isGalleryMode,
-    selectedCommitIds,
-    toggleGalleryMode,
-    toggleCommitSelection,
-    clearSelectedCommits,
     // Internal — exposed for CloudSyncContext
     previouslyWorkingBranchId,
     cloudSyncedCommitIdsRef,

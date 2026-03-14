@@ -8,6 +8,7 @@ import { RecentProjectsProvider } from "@/contexts/RecentProjectsContext";
 import { ModelProvider } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
 import { CloudSyncProvider } from "@/contexts/CloudSyncContext";
+import { GalleryProvider } from "@/contexts/GalleryContext";
 import { PresenceProvider } from "@/contexts/PresenceContext";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
@@ -25,6 +26,7 @@ const App = () => (
           <PresenceProvider>
             <VersionControlProvider>
               <CloudSyncProvider>
+              <GalleryProvider>
               <ModelProvider>
                 <TooltipProvider>
                   <Toaster />
@@ -38,6 +40,7 @@ const App = () => (
                   </Routes>
                 </TooltipProvider>
               </ModelProvider>
+              </GalleryProvider>
               </CloudSyncProvider>
             </VersionControlProvider>
           </PresenceProvider>

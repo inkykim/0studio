@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useModel, SceneStats, GeneratedObject, LoadedModel } from "@/contexts/ModelContext";
 import { useVersionControl } from "@/contexts/VersionControlContext";
+import { useGallery } from "@/contexts/GalleryContext";
 import { useRecentProjects } from "@/contexts/RecentProjectsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDesktopAPI } from "@/lib/desktop-api";
@@ -764,7 +765,8 @@ export const ModelViewer = () => {
     triggerFileDialog,
   } = useModel();
   
-  const { isGalleryMode, selectedCommitIds, commits, currentCommitId, currentModel, modelName } = useVersionControl();
+  const { commits, currentCommitId, currentModel, modelName } = useVersionControl();
+  const { isGalleryMode, selectedCommitIds } = useGallery();
 
   const [isDragOver, setIsDragOver] = useState(false);
   const [galleryModelData, setGalleryModelData] = useState<Map<string, LoadedModel>>(new Map());

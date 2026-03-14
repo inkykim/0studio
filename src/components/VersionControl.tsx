@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useModel } from "@/contexts/ModelContext";
 import { useVersionControl, ModelCommit, Branch } from "@/contexts/VersionControlContext";
 import { useCloudSync } from "@/contexts/CloudSyncContext";
+import { useGallery } from "@/contexts/GalleryContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -400,12 +401,14 @@ export const VersionControl = () => {
     clearCurrentModel,
     toggleStarCommit,
     getCommitVersionLabel,
+  } = useVersionControl();
+  const {
     isGalleryMode,
     selectedCommitIds,
     toggleGalleryMode,
     toggleCommitSelection,
     clearSelectedCommits,
-  } = useVersionControl();
+  } = useGallery();
   const {
     cloudProject,
     cloudSyncedCommitIds,
