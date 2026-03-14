@@ -105,5 +105,5 @@ app.use((_err, _req, res, _next) => {
 ensureS3Cors();
 
 app.listen(PORT, () => {
-  // Server started
+  console.log(`Server running on http://localhost:${PORT}`);
 });

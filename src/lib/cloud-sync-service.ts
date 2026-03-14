@@ -275,6 +275,44 @@ class CloudSyncService {
     const commitBuffer = await this.pullCommitFile(projectId, latestCommitId);
     return { treeData, latestCommitId, commitBuffer };
   }
+
+  /**
+   * Download the full project: tree.json + every commit .3dm file.
+   * Calls onProgress(downloaded, total) after each commit so the UI can report status.
+   */
+  async downloadFullProject(
+    projectId: string,
+    onProgress?: (downloaded: number, total: number) => void,
+  ): Promise<{
+    treeData: RemoteTreeData;
+    commitBuffers: Map<string, ArrayBuffer>;
+  } | null> {
+    const treeData = await this.pullTreeJson(projectId);
+    if (!treeData) return null;
+
+    const commitIds = treeData.commits.map(c => c.id);
+    const commitBuffers = new Map<string, ArrayBuffer>();
+    let downloaded = 0;
+
+    // Download commits in parallel batches of 4 to avoid overwhelming the network
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < commitIds.length; i += BATCH_SIZE) {
+      const batch = commitIds.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (id) => {
+          const buffer = await this.pullCommitFile(projectId, id);
+          return { id, buffer };
+        }),
+      );
+      for (const { id, buffer } of results) {
+        commitBuffers.set(id, buffer);
+        downloaded++;
+        onProgress?.(downloaded, commitIds.length);
+      }
+    }
+
+    return { treeData, commitBuffers };
+  }
 }
 
 export const cloudSyncService = new CloudSyncService();

@@ -301,7 +301,9 @@ class RhinoStudio {
         return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
     }
     async writeFileBuffer(filePath, buffer) {
-        this.validateProjectPath(filePath);
+        if (this.currentProjectFile) {
+            this.validateProjectPath(filePath);
+        }
         const fsPromises = await import('fs/promises');
         const nodeBuffer = Buffer.from(buffer);
         await fsPromises.writeFile(filePath, nodeBuffer);

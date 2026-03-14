@@ -127,22 +127,38 @@ export default function WelcomePanel({
 
       toast.loading('Downloading project from cloud...', { id: 'shared-download' });
 
-      const snapshot = await cloudSyncService.downloadLatestSnapshot(project.id);
-      if (!snapshot) {
+      const result = await cloudSyncService.downloadFullProject(project.id, (downloaded, total) => {
+        toast.loading(`Downloading commits ${downloaded}/${total}...`, { id: 'shared-download' });
+      });
+      if (!result) {
         toast.error('No data found in cloud for this project', { id: 'shared-download' });
         return;
       }
 
-      // Write the .3dm file to the chosen path
-      await desktopAPI.writeFileBuffer(savePath, snapshot.commitBuffer);
+      const { treeData, commitBuffers } = result;
 
-      // Save the commit file in the 0studio storage directory
-      await desktopAPI.saveCommitFile(savePath, snapshot.latestCommitId, snapshot.commitBuffer);
+      // Find the head commit of the active branch to use as the working file
+      const activeBranch = treeData.branches.find(b => b.id === treeData.activeBranchId);
+      const headCommitId = activeBranch?.headCommitId;
+      const headBuffer = headCommitId ? commitBuffers.get(headCommitId) : undefined;
 
-      // Save tree.json with cloud synced IDs
-      const allCommitIds = snapshot.treeData.commits.map(c => c.id);
+      if (!headBuffer || !headCommitId) {
+        toast.error('Could not find the latest version of this project', { id: 'shared-download' });
+        return;
+      }
+
+      // Write the working .3dm file
+      await desktopAPI.writeFileBuffer(savePath, headBuffer);
+
+      // Save every commit .3dm to the local 0studio storage directory
+      for (const [commitId, buffer] of commitBuffers) {
+        await desktopAPI.saveCommitFile(savePath, commitId, buffer);
+      }
+
+      // Save tree.json with all commits marked as cloud-synced
+      const allCommitIds = treeData.commits.map(c => c.id);
       await desktopAPI.saveTreeFile(savePath, {
-        ...snapshot.treeData,
+        ...treeData,
         cloudSyncedCommitIds: allCommitIds,
       });
 
