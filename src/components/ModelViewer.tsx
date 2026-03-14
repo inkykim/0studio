@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import * as THREE from "three";
-import { X } from "lucide-react";
+import { X, FileBox } from "lucide-react";
 import { useModel, SceneStats, GeneratedObject, LoadedModel } from "@/contexts/ModelContext";
 import { useVersionControl } from "@/contexts/VersionControlContext";
 import { useGallery } from "@/contexts/GalleryContext";

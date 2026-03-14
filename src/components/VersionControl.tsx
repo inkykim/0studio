@@ -408,6 +408,7 @@ export const VersionControl = () => {
     toggleGalleryMode,
     toggleCommitSelection,
     clearSelectedCommits,
+    resetGallery,
   } = useGallery();
   const {
     cloudProject,
@@ -473,6 +474,7 @@ export const VersionControl = () => {
 
   const handleCloseModel = () => {
     clearModel();
+    resetGallery();
     clearCurrentModel().catch(() => {});
   };
 

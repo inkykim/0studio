@@ -76,3 +76,8 @@ The backend is split into modules:
 - `backend/routes/stripe.js` — Stripe payment + webhook routes (`/api/stripe`)
 
 Each route file exports a factory function that receives dependencies and returns an Express Router. All routes require a Supabase JWT in `Authorization: Bearer` except Stripe webhooks.
+
+**Important backend details:**
+- Rate limiting is scoped to `/api/aws` and `/api/projects/:projectId/sync` only
+- The Stripe webhook path (`/api/stripe/webhook`) must receive a raw body for signature verification — `express.raw()` is mounted for this path before `express.json()` in server.js. Do not reorder these.
+- `WelcomePanel` is a standalone component in `src/components/WelcomePanel.tsx` (extracted from ModelViewer)

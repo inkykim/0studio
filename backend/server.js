@@ -29,10 +29,6 @@ const BUCKET_NAME = process.env.S3_BUCKET_NAME;
 // ---------------------------------------------------------------------------
 // Clients
 // ---------------------------------------------------------------------------
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.STRIPE_SECRET_KEY) {
-  process.exit(1);
-}
-
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 const s3Client = new S3Client({
@@ -73,17 +69,16 @@ app.use(cors({
   credentials: true,
 }));
 
-// Global rate limiter — skip the webhook route (needs raw body, not JSON)
-const apiLimiter = rateLimit({
+// Rate limiting — scoped to S3 and sync routes
+const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: 'Too many requests from this IP, please try again later.',
-  skip: (req) => req.originalUrl === '/api/stripe/webhook',
 });
-app.use('/api', apiLimiter);
+app.use('/api/aws', limiter);
 
-// Stripe webhook must be mounted BEFORE express.json() so the raw body is preserved
-app.use('/api/stripe', createStripeRoutes({ stripe, supabase, verifyAuth }));
+// Stripe webhook needs raw body for signature verification — must come before express.json()
+app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 
 // JSON body parser for all other routes
 app.use(express.json());
@@ -96,7 +91,8 @@ app.get('/health', (_req, res) => {
 // Route modules
 app.use('/api/aws', createS3Routes({ s3Client, BUCKET_NAME, verifyAuth, validateS3Key }));
 app.use('/api/projects', createProjectRoutes({ supabase, verifyAuth, checkProjectPermission, resolvePendingInvites, sendProjectInviteEmail }));
-app.use('/api/projects/:projectId/sync', createSyncRoutes({ s3Client, BUCKET_NAME, verifyAuth, checkProjectPermission }));
+app.use('/api/projects/:projectId/sync', limiter, createSyncRoutes({ s3Client, BUCKET_NAME, verifyAuth, checkProjectPermission }));
+app.use('/api/stripe', createStripeRoutes({ stripe, supabase, verifyAuth }));
 
 // Error handling
 app.use((_err, _req, res, _next) => {
