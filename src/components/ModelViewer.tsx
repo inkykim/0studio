@@ -2,346 +2,13 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import * as THREE from "three";
-import {
-  FileBox,
-  X,
-  FolderOpen,
-  ChevronRight,
-  Cloud,
-  CloudDownload,
-  Loader2,
-  Users,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { X } from "lucide-react";
 import { useModel, SceneStats, GeneratedObject, LoadedModel } from "@/contexts/ModelContext";
 import { useVersionControl } from "@/contexts/VersionControlContext";
 import { useGallery } from "@/contexts/GalleryContext";
-import { useRecentProjects } from "@/contexts/RecentProjectsContext";
-import { useAuth } from "@/contexts/AuthContext";
 import { useDesktopAPI } from "@/lib/desktop-api";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { projectAPI, CloudProject } from "@/lib/project-api";
-import { cloudSyncService, getLocalPathForProject, setCloudProjectPath, getSeenSharedProjectIds, markProjectAsSeen } from "@/lib/cloud-sync-service";
-import { toast } from "sonner";
-
-/** Shorten path for display - replace /Users/username with ~ */
-function shortenPath(path: string): string {
-  // Match /Users/username or C:\Users\username
-  const usersMatch = path.match(/^(\/Users\/[^/]+)(\/.*)?$/);
-  if (usersMatch) {
-    return "~" + (usersMatch[2] || "");
-  }
-  const winMatch = path.match(/^([A-Z]:\\Users\\[^\\]+)(\\.*)?$/i);
-  if (winMatch) {
-    return "~" + (winMatch[2]?.replace(/\\/g, "/") || "");
-  }
-  // Fallback: show last 2 path segments
-  const parts = path.split(/[/\\]/).filter(Boolean);
-  if (parts.length > 2) {
-    return "…/" + parts.slice(-2).join("/");
-  }
-  return path;
-}
-
-function WelcomePanel({
-  triggerFileDialog,
-  onDragDropHint,
-}: {
-  triggerFileDialog: () => void;
-  onDragDropHint: string;
-}) {
-  const { user } = useAuth();
-  const { recentProjects } = useRecentProjects();
-  const desktopAPI = useDesktopAPI();
-  const isDesktop = desktopAPI.isDesktop;
-  const signedIn = !!user;
-
-  const [sharedProjects, setSharedProjects] = useState<CloudProject[]>([]);
-  const [loadingShared, setLoadingShared] = useState(false);
-  const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
-
-  // Fetch shared projects when user is signed in
-  useEffect(() => {
-    if (!signedIn || !user) return;
-
-    let cancelled = false;
-    const fetchShared = async () => {
-      setLoadingShared(true);
-      try {
-        const projects = await projectAPI.getUserProjects();
-        if (!cancelled) {
-          setSharedProjects(projects);
-
-          // Check for new shared projects and show notifications
-          const seen = getSeenSharedProjectIds(user.id);
-          const newProjects = projects.filter(p => !seen.includes(p.id) && p.owner_id !== user.id);
-          for (const proj of newProjects) {
-            toast.info(`"${proj.name}" was shared with you`, {
-              description: 'You can download it from the Shared Projects section.',
-              duration: 6000,
-            });
-            markProjectAsSeen(user.id, proj.id);
-          }
-          // Also mark owned projects as seen
-          for (const proj of projects.filter(p => p.owner_id === user.id)) {
-            markProjectAsSeen(user.id, proj.id);
-          }
-        }
-      } catch {
-        // Silently fail -- user might not have network
-      } finally {
-        if (!cancelled) setLoadingShared(false);
-      }
-    };
-    fetchShared();
-    return () => { cancelled = true; };
-  }, [signedIn, user]);
-
-  const handleOpenRecent = async (path: string) => {
-    if (isDesktop) {
-      await desktopAPI.openProjectByPath(path);
-    }
-  };
-
-  const handleOpenSharedProject = async (project: CloudProject) => {
-    if (!user || !isDesktop) return;
-
-    // Check if we already have a local path for this project
-    const existingPath = getLocalPathForProject(user.id, project.id);
-    if (existingPath) {
-      try {
-        await desktopAPI.openProjectByPath(existingPath);
-        return;
-      } catch {
-        // File may have been moved/deleted -- fall through to re-download
-      }
-    }
-
-    // First-time pull: show save dialog, then download
-    setDownloadingProjectId(project.id);
-    try {
-      const suggestedName = project.name.endsWith('.3dm') ? project.name : `${project.name}.3dm`;
-      const savePath = await desktopAPI.showSaveDialog({
-        defaultPath: suggestedName,
-        filters: [
-          { name: 'Rhino 3D Models', extensions: ['3dm'] },
-        ],
-      });
-
-      if (!savePath) {
-        // User cancelled the dialog
-        return;
-      }
-
-      toast.loading('Downloading project from cloud...', { id: 'shared-download' });
-
-      const snapshot = await cloudSyncService.downloadLatestSnapshot(project.id);
-      if (!snapshot) {
-        toast.error('No data found in cloud for this project', { id: 'shared-download' });
-        return;
-      }
-
-      // Write the .3dm file to the chosen path
-      await desktopAPI.writeFileBuffer(savePath, snapshot.commitBuffer);
-
-      // Save the commit file in the 0studio storage directory
-      await desktopAPI.saveCommitFile(savePath, snapshot.latestCommitId, snapshot.commitBuffer);
-
-      // Save tree.json with cloud synced IDs
-      const allCommitIds = snapshot.treeData.commits.map(c => c.id);
-      await desktopAPI.saveTreeFile(savePath, {
-        ...snapshot.treeData,
-        cloudSyncedCommitIds: allCommitIds,
-      });
-
-      // Remember this path for future pulls
-      setCloudProjectPath(user.id, project.id, savePath);
-
-      toast.success('Project downloaded successfully', { id: 'shared-download' });
-
-      // Open the downloaded file
-      await desktopAPI.openProjectByPath(savePath);
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to download project', { id: 'shared-download' });
-    } finally {
-      setDownloadingProjectId(null);
-    }
-  };
-
-  // Split shared projects into owned vs shared-with-me
-  const sharedWithMe = sharedProjects.filter(p => user && p.owner_id !== user.id);
-  const ownedProjects = sharedProjects.filter(p => user && p.owner_id === user.id);
-
-  return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center">
-      <div className="flex flex-col items-center gap-8 max-w-md w-full mx-4">
-        <div className="flex flex-col items-center gap-4">
-          <h1 className="text-3xl font-semibold tracking-tight">0studio</h1>
-        </div>
-
-        <div className="w-full flex flex-col gap-6 bg-background/80 backdrop-blur-xl border border-border/50 rounded-lg shadow-2xl p-6">
-          {/* Primary actions */}
-          <div className="flex flex-col gap-2">
-            <Button
-              onClick={triggerFileDialog}
-              variant="secondary"
-              className="h-14 w-full justify-start gap-4 px-4 hover:bg-muted/80 transition-colors"
-            >
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <FolderOpen className="w-5 h-5 text-primary" />
-              </div>
-              <div className="text-left">
-                <div className="font-medium">Open project</div>
-                <div className="text-xs text-muted-foreground">{onDragDropHint}</div>
-              </div>
-              <ChevronRight className="w-4 h-4 ml-auto text-muted-foreground" />
-            </Button>
-            <Button
-              onClick={triggerFileDialog}
-              variant="ghost"
-              className="h-12 w-full justify-start gap-4 px-4"
-            >
-              <FileBox className="w-5 h-5 text-muted-foreground" />
-              <span>Import .3dm file</span>
-            </Button>
-          </div>
-
-          {/* Recent projects */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-muted-foreground">Recent projects</h2>
-              {recentProjects.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {recentProjects.length} {recentProjects.length === 1 ? "project" : "projects"}
-                </span>
-              )}
-            </div>
-            <div className="max-h-40 overflow-auto space-y-0.5">
-              {!signedIn ? (
-                <p className="text-sm text-muted-foreground/70 py-2">
-                  Sign in to see your recent projects.
-                </p>
-              ) : recentProjects.length === 0 ? (
-                <p className="text-sm text-muted-foreground/70 py-2">
-                  No recent projects. Open a .3dm file to get started.
-                </p>
-              ) : (
-                recentProjects.map((project) => (
-                  <button
-                    key={project.path}
-                    onClick={() => handleOpenRecent(project.path)}
-                    disabled={!isDesktop}
-                    className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-left hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
-                  >
-                    <span className="font-medium truncate flex-1 min-w-0">{project.name}</span>
-                    <span className="text-xs text-muted-foreground truncate max-w-[120px]">
-                      {shortenPath(project.path)}
-                    </span>
-                    {isDesktop && (
-                      <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-                    )}
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Shared projects */}
-          {signedIn && (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5" />
-                  Shared with you
-                </h2>
-                {sharedWithMe.length > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    {sharedWithMe.length} {sharedWithMe.length === 1 ? "project" : "projects"}
-                  </span>
-                )}
-              </div>
-              <div className="max-h-40 overflow-auto space-y-0.5">
-                {loadingShared ? (
-                  <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground/70">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Loading shared projects...
-                  </div>
-                ) : sharedWithMe.length === 0 ? (
-                  <p className="text-sm text-muted-foreground/70 py-2">
-                    No projects shared with you yet.
-                  </p>
-                ) : (
-                  sharedWithMe.map((project) => {
-                    const localPath = user ? getLocalPathForProject(user.id, project.id) : null;
-                    const isDownloading = downloadingProjectId === project.id;
-
-                    return (
-                      <button
-                        key={project.id}
-                        onClick={() => handleOpenSharedProject(project)}
-                        disabled={!isDesktop || isDownloading}
-                        className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-left hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
-                      >
-                        <Cloud className="w-4 h-4 text-blue-400 flex-shrink-0" />
-                        <span className="font-medium truncate flex-1 min-w-0">{project.name}</span>
-                        {isDownloading ? (
-                          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground flex-shrink-0" />
-                        ) : localPath ? (
-                          <span className="text-xs text-muted-foreground truncate max-w-[120px]">
-                            {shortenPath(localPath)}
-                          </span>
-                        ) : (
-                          <CloudDownload className="w-4 h-4 text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-                        )}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Your cloud projects (owned) */}
-          {signedIn && ownedProjects.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
-                  <Cloud className="w-3.5 h-3.5" />
-                  Your cloud projects
-                </h2>
-                <span className="text-xs text-muted-foreground">
-                  {ownedProjects.length} {ownedProjects.length === 1 ? "project" : "projects"}
-                </span>
-              </div>
-              <div className="max-h-32 overflow-auto space-y-0.5">
-                {ownedProjects.map((project) => {
-                  const localPath = user ? getLocalPathForProject(user.id, project.id) : null;
-                  const displayPath = localPath || project.s3_key;
-                  return (
-                    <button
-                      key={project.id}
-                      onClick={() => handleOpenSharedProject(project)}
-                      disabled={!isDesktop}
-                      className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-md text-left hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
-                    >
-                      <span className="font-medium truncate flex-1 min-w-0">{project.name}</span>
-                      <span className="text-xs text-muted-foreground truncate max-w-[120px]">
-                        {shortenPath(displayPath)}
-                      </span>
-                      {isDesktop && (
-                        <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+import WelcomePanel from "@/components/WelcomePanel";
 
 function DefaultCube() {
   return (
@@ -443,16 +110,20 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
   const orbitControls = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
 
   useLayoutEffect(() => {
+    console.log(`LoadedObjects effect triggered with ${objects.length} objects`);
+    
     if (groupRef.current && objects.length > 0) {
       // Clear existing children
       while (groupRef.current.children.length > 0) {
         groupRef.current.remove(groupRef.current.children[0]);
       }
 
+      console.log("Adding objects to scene...");
+      
       // Add new objects
-      objects.forEach((obj) => {
+      objects.forEach((obj, index) => {
         const clonedObj = obj.clone();
-
+        
         // Make sure materials are visible
         clonedObj.traverse((child) => {
           if (child instanceof THREE.Mesh) {
@@ -463,15 +134,19 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
                 const c = mat.color;
                 if (c.r < 0.1 && c.g < 0.1 && c.b < 0.1) {
                   mat.color.setHex(0xaaaaaa);
+                  console.log(`Fixed black material on ${child.name}`);
                 }
               }
               mat.needsUpdate = true;
             }
           }
         });
-
+        
         groupRef.current!.add(clonedObj);
+        console.log(`Added object ${index}: ${obj.name || 'unnamed'}, type: ${obj.type}`);
       });
+
+      console.log(`Total objects in group: ${groupRef.current.children.length}`);
 
       // Preserve original position, rotation, and scale from Rhino
       // Do NOT reset transforms - this preserves the exact orientation as in Rhino
@@ -485,6 +160,13 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
       if (!box.isEmpty()) {
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
+        
+        console.log(`File: ${objects[0]?.userData?.fileName || 'Unknown'}`);
+        console.log(`Bounding box - min: (${box.min.x.toFixed(2)}, ${box.min.y.toFixed(2)}, ${box.min.z.toFixed(2)})`);
+        console.log(`Bounding box - max: (${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`);
+        console.log(`Bounding box - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+        console.log(`Bounding box - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
+        console.log(`Model orientation preserved from Rhino - no transforms applied`);
 
         // Calculate model scale for grid adjustment
         const maxDim = Math.max(size.x, size.y, size.z);
@@ -501,7 +183,16 @@ function LoadedObjects({ objects, onScaleChange }: { objects: THREE.Object3D[]; 
         // Position camera to fit the model in view, looking at the model's center
         // This preserves the original orientation while ensuring the model is visible
         fitCameraToModel(camera as THREE.PerspectiveCamera, box, orbitControls, center);
+        
+        console.log(`Camera positioned at: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
+        console.log(`Camera target (model center): (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+      } else {
+        console.warn("Bounding box is empty!");
       }
+      
+      console.log("Objects successfully added and centered");
+    } else {
+      console.log("No objects to display or group ref not ready");
     }
   }, [objects, camera, controls]);
 
@@ -517,15 +208,18 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
   
   useLayoutEffect(() => {
     if (!groupRef.current) return;
-
+    
+    console.log(`GeneratedObjects effect triggered with ${objects.length} objects`);
+    
     // Clear existing children
     while (groupRef.current.children.length > 0) {
       groupRef.current.remove(groupRef.current.children[0]);
     }
     
     // Add all generated objects
-    objects.forEach((genObj) => {
+    objects.forEach((genObj, index) => {
       groupRef.current!.add(genObj.object);
+      console.log(`Added generated object ${index}: ${genObj.object.name || 'unnamed'}`);
     });
     
     if (objects.length > 0) {
@@ -539,7 +233,11 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
       
       if (!box.isEmpty()) {
         const center = box.getCenter(new THREE.Vector3());
-
+        const size = box.getSize(new THREE.Vector3());
+        
+        console.log(`Generated objects - center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+        console.log(`Generated objects - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
+        
         // Move group so its center is at origin
         groupRef.current.position.set(-center.x, -center.y, -center.z);
         
@@ -555,6 +253,8 @@ function GeneratedObjects({ objects }: { objects: GeneratedObject[] }) {
         
         // Position camera to fit the model in view (no scaling - let camera handle fit)
         fitCameraToModel(camera as THREE.PerspectiveCamera, centeredBox, orbitControls, centeredCenter);
+        
+        console.log(`Camera positioned for generated objects at: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
       }
     }
     
@@ -636,36 +336,53 @@ function SceneStatsCalculator({
 
       // Count objects from the loaded model
       if (modelObjects && modelObjects.length > 0) {
+        const objectDetails: string[] = [];
+        
         modelObjects.forEach((obj) => {
           obj.traverse((child) => {
             // Get the original Rhino object type from userData
             const objectType = child.userData?.objectType as string | undefined;
-
+            
             if (objectType) {
               switch (objectType) {
                 case 'Curve':
                   curves++;
+                  objectDetails.push(`Curve: ${child.name || 'unnamed'}`);
                   break;
                 case 'Mesh':
                   // A single mesh is a surface
                   surfaces++;
+                  objectDetails.push(`Surface (Mesh): ${child.name || 'unnamed'}`);
                   break;
                 case 'Brep':
                   // Breps are polysurfaces (boundary representations)
                   polysurfaces++;
+                  objectDetails.push(`Polysurface (Brep): ${child.name || 'unnamed'}`);
                   break;
                 case 'Extrusion':
                   // Extrusions are also polysurfaces
                   polysurfaces++;
+                  objectDetails.push(`Polysurface (Extrusion): ${child.name || 'unnamed'}`);
                   break;
                 case 'SubD':
                   // SubD surfaces count as surfaces
                   surfaces++;
+                  objectDetails.push(`Surface (SubD): ${child.name || 'unnamed'}`);
                   break;
+                default:
+                  // Log unknown types for debugging
+                  if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+                    console.log(`Unknown objectType: ${objectType}`);
+                  }
               }
             }
           });
         });
+        
+        // Log once when model changes
+        if (objectDetails.length > 0) {
+          console.log("Model breakdown:", objectDetails);
+        }
       }
 
       // Count generated objects as polysurfaces (AI-generated primitives are solid shapes)
@@ -814,8 +531,8 @@ export const ModelViewer = () => {
             const loaded = await load3dmFile(file);
             newModelData.set(commit.id, loaded);
           }
-        } catch {
-          // Silent catch
+        } catch (error) {
+          console.error(`Failed to load model data for commit ${commit.id}:`, error);
         }
       }
       
