@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useModel } from '@/contexts/ModelContext';
+import { useVersionControl } from '@/contexts/VersionControlContext';
 import { TitleBar } from '@/components/TitleBar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -46,6 +47,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { projectAPI, CloudProject, ProjectMemberWithEmail } from '@/lib/project-api';
 import { ProjectMemberRole } from '@/lib/supabase';
+import { cloudSyncService, RemoteTreeData } from '@/lib/cloud-sync-service';
 
 // ============ Account Settings Tab ============
 function AccountSettings() {
@@ -212,6 +214,14 @@ function roleBadgeVariant(role: ProjectMemberRole): 'default' | 'secondary' | 'o
 function ProjectSettings() {
   const { user } = useAuth();
   const { currentFile, fileName } = useModel();
+  const {
+    commits,
+    branches,
+    activeBranchId,
+    currentCommitId,
+    previouslyWorkingBranchId,
+    cloudSyncedCommitIdsRef,
+  } = useVersionControl();
 
   const [cloudProject, setCloudProject] = useState<CloudProject | null>(null);
   const [members, setMembers] = useState<ProjectMemberWithEmail[]>([]);
@@ -258,6 +268,34 @@ function ProjectSettings() {
     try {
       const project = await projectAPI.registerProject(fileName.replace('.3dm', ''), currentFile);
       setCloudProject(project);
+
+      // Push tree.json to S3 so the project is immediately usable
+      const treeData: RemoteTreeData = {
+        version: '1.0',
+        activeBranchId,
+        currentCommitId,
+        previouslyWorkingBranchId,
+        cloudSyncedCommitIds: Array.from(cloudSyncedCommitIdsRef.current),
+        branches: branches.map(b => ({
+          id: b.id,
+          name: b.name,
+          headCommitId: b.headCommitId,
+          color: b.color,
+          isMain: b.isMain,
+          parentBranchId: b.parentBranchId,
+          originCommitId: b.originCommitId,
+        })),
+        commits: commits.map(c => ({
+          id: c.id,
+          message: c.message,
+          timestamp: c.timestamp,
+          parentCommitId: c.parentCommitId,
+          branchId: c.branchId,
+          starred: c.starred || false,
+        })),
+      };
+      await cloudSyncService.pushTreeJson(project.id, treeData);
+
       toast.success('Project enabled for collaboration');
 
       // Reload members
