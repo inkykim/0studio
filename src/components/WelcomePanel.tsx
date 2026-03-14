@@ -154,7 +154,6 @@ export default function WelcomePanel({
       // Open the downloaded file
       await desktopAPI.openProjectByPath(savePath);
     } catch (error: any) {
-      console.error('Error downloading shared project:', error);
       toast.error(error.message || 'Failed to download project', { id: 'shared-download' });
     } finally {
       setDownloadingProjectId(null);
