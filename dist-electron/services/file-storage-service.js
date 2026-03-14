@@ -26,7 +26,6 @@ export class FileStorageService {
         const folderPath = this.getStorageFolderPath(filePath);
         if (!existsSync(folderPath)) {
             await mkdir(folderPath, { recursive: true });
-            console.log(`Created 0studio storage folder: ${folderPath}`);
         }
     }
     /**
@@ -50,7 +49,6 @@ export class FileStorageService {
         const commitFilePath = this.getCommitFilePath(filePath, commitId);
         const nodeBuffer = Buffer.from(fileBuffer);
         await writeFile(commitFilePath, nodeBuffer);
-        console.log(`Saved commit file: ${commitFilePath} (${fileBuffer.byteLength} bytes)`);
     }
     /**
      * Read a commit file from the 0studio folder
@@ -61,12 +59,10 @@ export class FileStorageService {
     async readCommitFile(filePath, commitId) {
         const commitFilePath = this.getCommitFilePath(filePath, commitId);
         if (!existsSync(commitFilePath)) {
-            console.log(`Commit file not found: ${commitFilePath}`);
             return null;
         }
         const buffer = await readFile(commitFilePath);
         const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-        console.log(`Read commit file: ${commitFilePath} (${arrayBuffer.byteLength} bytes)`);
         return arrayBuffer;
     }
     /**
@@ -120,7 +116,6 @@ export class FileStorageService {
         const treeFilePath = this.getTreeFilePath(filePath);
         const jsonContent = JSON.stringify(treeData, null, 2); // Pretty print for debugging
         await writeFile(treeFilePath, jsonContent, 'utf-8');
-        console.log(`Saved tree.json to commit storage folder: ${treeFilePath}`);
     }
     /**
      * Load the commit tree structure from tree.json
@@ -130,17 +125,14 @@ export class FileStorageService {
     async loadTreeFile(filePath) {
         const treeFilePath = this.getTreeFilePath(filePath);
         if (!existsSync(treeFilePath)) {
-            console.log(`tree.json not found: ${treeFilePath}`);
             return null;
         }
         try {
             const content = await readFile(treeFilePath, 'utf-8');
             const treeData = JSON.parse(content);
-            console.log(`Loaded tree.json: ${treeFilePath}`);
             return treeData;
         }
-        catch (error) {
-            console.error(`Failed to parse tree.json: ${treeFilePath}`, error);
+        catch {
             return null;
         }
     }
@@ -155,7 +147,6 @@ export class FileStorageService {
         for (const commitId of commitIds) {
             if (!this.commitFileExists(filePath, commitId)) {
                 missing.push(commitId);
-                console.warn(`⚠️ Commit file missing: commit-${commitId}.3dm`);
             }
         }
         return missing;

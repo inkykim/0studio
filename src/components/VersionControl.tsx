@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useModel } from "@/contexts/ModelContext";
 import { useVersionControl, ModelCommit, Branch } from "@/contexts/VersionControlContext";
+import { useCloudSync } from "@/contexts/CloudSyncContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -383,11 +384,11 @@ export const VersionControl = () => {
     triggerFileDialog, 
     loadedModel,
   } = useModel();
-  const { 
-    currentModel, 
-    modelName, 
-    commits, 
-    currentCommitId, 
+  const {
+    currentModel,
+    modelName,
+    commits,
+    currentCommitId,
     hasUnsavedChanges,
     branches,
     pulledCommitId,
@@ -404,6 +405,8 @@ export const VersionControl = () => {
     toggleGalleryMode,
     toggleCommitSelection,
     clearSelectedCommits,
+  } = useVersionControl();
+  const {
     cloudProject,
     cloudSyncedCommitIds,
     cloudSyncStatus,
@@ -411,7 +414,7 @@ export const VersionControl = () => {
     pushToCloud,
     pullFromCloud,
     refreshCloudStatus,
-  } = useVersionControl();
+  } = useCloudSync();
   
   const [commitMessage, setCommitMessage] = useState("");
   const [isCommitting, setIsCommitting] = useState(false);

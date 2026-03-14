@@ -4,9 +4,6 @@ import { LoadedModel } from "./ModelContext";
 import { exportModelToBuffer } from "@/lib/rhino3dm-service";
 import { getFileBuffer } from "@/lib/commit-storage";
 import { toast } from "sonner";
-import { cloudSyncService, type RemoteTreeData, type SyncStatus, findProjectIdByLocalPath, setCloudProjectPath } from "@/lib/cloud-sync-service";
-import { projectAPI, type CloudProject } from "@/lib/project-api";
-import { supabase } from "@/lib/supabase";
 import { usePresence } from '@/contexts/PresenceContext';
 
 interface ModelCommit {
@@ -68,14 +65,13 @@ interface VersionControlContextType {
   toggleCommitSelection: (commitId: string) => void;
   clearSelectedCommits: () => void;
   
-  // Cloud sync
-  cloudProject: CloudProject | null;
-  cloudSyncedCommitIds: Set<string>;
-  cloudSyncStatus: SyncStatus | null;
-  isCloudSyncing: boolean;
-  pushToCloud: () => Promise<void>;
-  pullFromCloud: () => Promise<void>;
-  refreshCloudStatus: () => Promise<void>;
+  // Internal — exposed for CloudSyncContext
+  previouslyWorkingBranchId: string | null;
+  cloudSyncedCommitIdsRef: React.MutableRefObject<Set<string>>;
+  setCloudSyncedCommitIdsExternal: (ids: Set<string>) => void;
+  setCommits: React.Dispatch<React.SetStateAction<ModelCommit[]>>;
+  setBranches: React.Dispatch<React.SetStateAction<Branch[]>>;
+  initialCloudSyncedCommitIds: string[] | null;
 
   // Model restoration callback - will be set by ModelContext
   onModelRestore?: (modelData: LoadedModel) => void;
@@ -111,14 +107,16 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
   const [pulledCommitId, setPulledCommitId] = useState<string | null>(null);
   const [previouslyWorkingBranchId, setPreviouslyWorkingBranchId] = useState<string | null>(null);
 
-  // Cloud sync state
-  const [cloudProject, setCloudProject] = useState<CloudProject | null>(null);
-  const [cloudSyncedCommitIds, setCloudSyncedCommitIds] = useState<Set<string>>(new Set());
-  const [cloudSyncStatus, setCloudSyncStatus] = useState<SyncStatus | null>(null);
-  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  // Cloud sync: ref kept here for saveTreeFile; state owned by CloudSyncContext
   const cloudSyncedCommitIdsRef = useRef<Set<string>>(new Set());
+  const [cloudSyncedCommitIdsState, setCloudSyncedCommitIdsState] = useState<Set<string>>(new Set());
+  const setCloudSyncedCommitIdsExternal = useCallback((ids: Set<string>) => {
+    setCloudSyncedCommitIdsState(ids);
+  }, []);
+  // Initial cloud synced IDs loaded from tree.json, for CloudSyncContext to pick up
+  const [initialCloudSyncedCommitIds, setInitialCloudSyncedCommitIds] = useState<string[] | null>(null);
 
-  const { joinProject, leaveProject, updatePresenceCommit } = usePresence();
+  const { updatePresenceCommit } = usePresence();
 
   const setModelRestoreCallback = useCallback((callback: (modelData: LoadedModel) => void) => {
     setOnModelRestore(() => callback);
@@ -329,52 +327,18 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
           setPreviouslyWorkingBranchId(treeData.previouslyWorkingBranchId);
         }
 
-        // Restore cloud synced commit IDs
+        // Signal cloud synced commit IDs to CloudSyncContext
         if (treeData.cloudSyncedCommitIds && treeData.cloudSyncedCommitIds.length > 0) {
-          const syncedSet = new Set(treeData.cloudSyncedCommitIds);
-          setCloudSyncedCommitIds(syncedSet);
-          cloudSyncedCommitIdsRef.current = syncedSet;
+          cloudSyncedCommitIdsRef.current = new Set(treeData.cloudSyncedCommitIds);
+          setInitialCloudSyncedCommitIds(treeData.cloudSyncedCommitIds);
         }
-        
+
         setBranches(treeData.branches);
         setCommits(treeData.commits);
         setActiveBranchId(treeData.activeBranchId);
         setCurrentCommitId(treeData.currentCommitId);
         updatePresenceCommit(treeData.currentCommitId);
         setIsLoadingTree(false);
-
-        // Detect cloud project in background (don't block loading)
-        // First check localStorage mapping (works for Person B who downloaded via shared projects),
-        // then fall back to file path match (works for Person A who registered the project).
-        (async () => {
-          try {
-            const { data: { session } } = await supabase.auth.getSession();
-            const userId = session?.user?.id;
-
-            // Check localStorage mapping first
-            if (userId) {
-              const mappedProjectId = findProjectIdByLocalPath(userId, path);
-              if (mappedProjectId) {
-                const allProjects = await projectAPI.getUserProjects();
-                const proj = allProjects.find(p => p.id === mappedProjectId);
-                if (proj) {
-                  setCloudProject(proj);
-                  return;
-                }
-              }
-            }
-
-            // Fall back to file path match (owner's original path)
-            const proj = await projectAPI.getProjectByFilePath(path);
-            if (proj) {
-              setCloudProject(proj);
-              // Also save mapping for future lookups
-              if (userId) setCloudProjectPath(userId, proj.id, path);
-            }
-          } catch {
-            // Not cloud-enabled, that's fine
-          }
-        })();
 
         return;
       }
@@ -939,11 +903,9 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     // Reset tree loading state
     setTreeLoadPromise(null);
     setIsLoadingTree(false);
-    // Reset cloud state
-    setCloudProject(null);
-    setCloudSyncStatus(null);
-    setCloudSyncedCommitIds(new Set());
+    // Reset cloud sync ref (CloudSyncContext will reset its own state via currentModel effect)
     cloudSyncedCommitIdsRef.current = new Set();
+    setInitialCloudSyncedCommitIds(null);
   }, [currentModel, branches, commits, saveTreeFile]);
 
   // Handle project-closed event from Electron
@@ -1187,249 +1149,6 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     }
   }, [currentModel, saveCommitsToStorage]);
 
-  // ==================== CLOUD SYNC METHODS ====================
-
-  const refreshCloudStatus = useCallback(async () => {
-    if (!cloudProject) return;
-
-    try {
-      const remoteTree = await cloudSyncService.pullTreeJson(cloudProject.id);
-      const remoteCommitIds = remoteTree?.commits?.map(c => c.id) || [];
-      const localCommitIds = commits.map(c => c.id);
-      const status = cloudSyncService.computeSyncStatus(
-        localCommitIds,
-        Array.from(cloudSyncedCommitIdsRef.current),
-        remoteCommitIds
-      );
-      setCloudSyncStatus(status);
-    } catch {
-      // Silent catch
-    }
-  }, [cloudProject, commits]);
-
-  const pushToCloud = useCallback(async () => {
-    if (!cloudProject || !currentModel) {
-      toast.error('Project is not cloud-enabled. Enable collaboration in Settings first.');
-      return;
-    }
-
-    setIsCloudSyncing(true);
-    try {
-      const unsyncedCommitIds = commits
-        .map(c => c.id)
-        .filter(id => !cloudSyncedCommitIdsRef.current.has(id));
-
-      if (unsyncedCommitIds.length === 0) {
-        toast.info('All commits are already synced');
-        setIsCloudSyncing(false);
-        return;
-      }
-
-      toast.info(`Pushing ${unsyncedCommitIds.length} commit(s) to cloud...`);
-
-      // Upload each unsynced commit file
-      for (const commitId of unsyncedCommitIds) {
-        let fileBuffer: ArrayBuffer | null = null;
-
-        // Try reading from local 0studio folder first
-        if (desktopAPI.isDesktop) {
-          fileBuffer = await desktopAPI.readCommitFile(currentModel, commitId);
-        }
-
-        // Fall back to in-memory buffer
-        if (!fileBuffer) {
-          const commit = commits.find(c => c.id === commitId);
-          if (commit?.fileBuffer) {
-            fileBuffer = commit.fileBuffer;
-          }
-        }
-
-        if (!fileBuffer) {
-          continue;
-        }
-
-        await cloudSyncService.pushCommitFile(cloudProject.id, commitId, fileBuffer);
-      }
-
-      // Update synced IDs
-      const newSynced = new Set(cloudSyncedCommitIdsRef.current);
-      unsyncedCommitIds.forEach(id => newSynced.add(id));
-      setCloudSyncedCommitIds(newSynced);
-      cloudSyncedCommitIdsRef.current = newSynced;
-
-      // Push updated tree.json with cloud-synced IDs
-      const treeData: RemoteTreeData = {
-        version: '1.0',
-        activeBranchId,
-        currentCommitId,
-        previouslyWorkingBranchId,
-        cloudSyncedCommitIds: Array.from(newSynced),
-        branches: branches.map(b => ({
-          id: b.id,
-          name: b.name,
-          headCommitId: b.headCommitId,
-          color: b.color,
-          isMain: b.isMain,
-          parentBranchId: b.parentBranchId,
-          originCommitId: b.originCommitId,
-        })),
-        commits: commits.map(c => ({
-          id: c.id,
-          message: c.message,
-          timestamp: c.timestamp,
-          parentCommitId: c.parentCommitId,
-          branchId: c.branchId,
-          starred: c.starred || false,
-        })),
-      };
-
-      await cloudSyncService.pushTreeJson(cloudProject.id, treeData);
-
-      // Refresh status
-      await refreshCloudStatus();
-
-      toast.success(`Pushed ${unsyncedCommitIds.length} commit(s) to cloud`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to push to cloud');
-    } finally {
-      setIsCloudSyncing(false);
-    }
-  }, [cloudProject, currentModel, commits, branches, activeBranchId, currentCommitId, previouslyWorkingBranchId, refreshCloudStatus]);
-
-  const pullFromCloud = useCallback(async () => {
-    if (!cloudProject || !currentModel) {
-      toast.error('Project is not cloud-enabled. Enable collaboration in Settings first.');
-      return;
-    }
-
-    setIsCloudSyncing(true);
-    try {
-      const remoteTree = await cloudSyncService.pullTreeJson(cloudProject.id);
-      if (!remoteTree) {
-        toast.info('No cloud data found for this project');
-        setIsCloudSyncing(false);
-        return;
-      }
-
-      const localCommitIds = new Set(commits.map(c => c.id));
-      const remoteOnlyCommitIds = remoteTree.commits
-        .map(c => c.id)
-        .filter(id => !localCommitIds.has(id));
-
-      if (remoteOnlyCommitIds.length === 0) {
-        toast.info('Already up to date');
-        setIsCloudSyncing(false);
-        return;
-      }
-
-      toast.info(`Pulling ${remoteOnlyCommitIds.length} commit(s) from cloud...`);
-
-      // Download each remote-only commit file
-      for (const commitId of remoteOnlyCommitIds) {
-        try {
-          const fileBuffer = await cloudSyncService.pullCommitFile(cloudProject.id, commitId);
-
-          // Save to local 0studio folder
-          if (desktopAPI.isDesktop) {
-            await desktopAPI.saveCommitFile(currentModel, commitId, fileBuffer);
-          }
-
-        } catch {
-          // Silent catch
-        }
-      }
-
-      // Merge remote commits and branches into local state
-      const mergedCommitMap = new Map<string, ModelCommit>();
-      for (const c of commits) {
-        mergedCommitMap.set(c.id, c);
-      }
-      for (const rc of remoteTree.commits) {
-        if (!mergedCommitMap.has(rc.id)) {
-          mergedCommitMap.set(rc.id, {
-            id: rc.id,
-            message: rc.message,
-            timestamp: rc.timestamp,
-            parentCommitId: rc.parentCommitId,
-            branchId: rc.branchId,
-            starred: rc.starred,
-          });
-        }
-      }
-
-      const mergedBranchMap = new Map<string, Branch>();
-      for (const b of branches) {
-        mergedBranchMap.set(b.id, b);
-      }
-      for (const rb of remoteTree.branches) {
-        if (!mergedBranchMap.has(rb.id)) {
-          mergedBranchMap.set(rb.id, {
-            id: rb.id,
-            name: rb.name,
-            headCommitId: rb.headCommitId,
-            color: rb.color,
-            isMain: rb.isMain,
-            parentBranchId: rb.parentBranchId,
-            originCommitId: rb.originCommitId,
-          });
-        } else {
-          // Update head if remote is newer
-          const local = mergedBranchMap.get(rb.id)!;
-          const localHead = mergedCommitMap.get(local.headCommitId);
-          const remoteHead = mergedCommitMap.get(rb.headCommitId);
-          if (remoteHead && localHead && remoteHead.timestamp > localHead.timestamp) {
-            mergedBranchMap.set(rb.id, { ...local, headCommitId: rb.headCommitId });
-          }
-        }
-      }
-
-      const mergedCommits = Array.from(mergedCommitMap.values()).sort((a, b) => b.timestamp - a.timestamp);
-      const mergedBranches = Array.from(mergedBranchMap.values());
-
-      // Update synced IDs (all remote commits are now locally available)
-      const newSynced = new Set(cloudSyncedCommitIdsRef.current);
-      remoteTree.commits.forEach(c => newSynced.add(c.id));
-      setCloudSyncedCommitIds(newSynced);
-      cloudSyncedCommitIdsRef.current = newSynced;
-
-      setCommits(mergedCommits);
-      setBranches(mergedBranches);
-
-      // Refresh sync status
-      const allIds = mergedCommits.map(c => c.id);
-      const remoteIds = remoteTree.commits.map(c => c.id);
-      const status = cloudSyncService.computeSyncStatus(allIds, Array.from(newSynced), remoteIds);
-      setCloudSyncStatus(status);
-
-      toast.success(`Pulled ${remoteOnlyCommitIds.length} commit(s) from cloud`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to pull from cloud');
-    } finally {
-      setIsCloudSyncing(false);
-    }
-  }, [cloudProject, currentModel, commits, branches]);
-
-  // Auto-detect cloud project when model changes
-  useEffect(() => {
-    if (!currentModel) {
-      setCloudProject(null);
-      setCloudSyncStatus(null);
-      setCloudSyncedCommitIds(new Set());
-      cloudSyncedCommitIdsRef.current = new Set();
-      return;
-    }
-  }, [currentModel]);
-
-  // Join/leave presence channel when cloudProject changes
-  useEffect(() => {
-    if (cloudProject?.id) {
-      joinProject(cloudProject.id);
-    } else {
-      leaveProject();
-    }
-    return () => leaveProject();
-  }, [cloudProject?.id, joinProject, leaveProject]);
-
   const value: VersionControlContextType = {
     currentModel,
     modelName,
@@ -1462,14 +1181,13 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     toggleGalleryMode,
     toggleCommitSelection,
     clearSelectedCommits,
-    // Cloud sync
-    cloudProject,
-    cloudSyncedCommitIds,
-    cloudSyncStatus,
-    isCloudSyncing,
-    pushToCloud,
-    pullFromCloud,
-    refreshCloudStatus,
+    // Internal — exposed for CloudSyncContext
+    previouslyWorkingBranchId,
+    cloudSyncedCommitIdsRef,
+    setCloudSyncedCommitIdsExternal,
+    setCommits,
+    setBranches,
+    initialCloudSyncedCommitIds,
     // Callbacks
     onModelRestore,
     setModelRestoreCallback,

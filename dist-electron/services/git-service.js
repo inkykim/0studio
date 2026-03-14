@@ -52,7 +52,6 @@ dist/
             writeFileSync(gitignorePath, gitignoreContent.trim());
             // Add initial files
             await this.git.add(['*.3dm', '.gitignore']);
-            console.log(`Git repository initialized at: ${repoPath}`);
         }
     }
     /**
@@ -100,7 +99,6 @@ dist/
             };
         }
         catch (error) {
-            console.error('Error getting git status:', error);
             throw error;
         }
     }
@@ -112,7 +110,6 @@ dist/
             await this.git.add(files);
         }
         catch (error) {
-            console.error('Error staging files:', error);
             throw error;
         }
     }
@@ -141,7 +138,6 @@ dist/
             };
         }
         catch (error) {
-            console.error('Error committing changes:', error);
             throw error;
         }
     }
@@ -160,7 +156,6 @@ dist/
             }));
         }
         catch (error) {
-            console.error('Error getting git log:', error);
             throw error;
         }
     }
@@ -172,7 +167,6 @@ dist/
             await this.git.checkout(commitHash);
         }
         catch (error) {
-            console.error('Error checking out commit:', error);
             throw error;
         }
     }
@@ -189,7 +183,6 @@ dist/
             }
         }
         catch (error) {
-            console.error('Error resetting to commit:', error);
             throw error;
         }
     }
@@ -201,7 +194,6 @@ dist/
             return await this.git.pull();
         }
         catch (error) {
-            console.error('Error pulling changes:', error);
             throw error;
         }
     }
@@ -213,7 +205,6 @@ dist/
             return await this.git.push();
         }
         catch (error) {
-            console.error('Error pushing changes:', error);
             throw error;
         }
     }
@@ -225,7 +216,6 @@ dist/
             await this.git.addRemote(name, url);
         }
         catch (error) {
-            console.error('Error adding remote:', error);
             throw error;
         }
     }
@@ -237,7 +227,6 @@ dist/
             return await this.git.getRemotes(true);
         }
         catch (error) {
-            console.error('Error getting remotes:', error);
             throw error;
         }
     }
@@ -249,7 +238,7 @@ dist/
             await this.git.status();
             return true;
         }
-        catch (error) {
+        catch {
             return false;
         }
     }
@@ -260,8 +249,7 @@ dist/
         try {
             return await this.git.revparse(['--abbrev-ref', 'HEAD']);
         }
-        catch (error) {
-            console.error('Error getting current branch:', error);
+        catch {
             return 'main';
         }
     }
@@ -278,7 +266,6 @@ dist/
             }
         }
         catch (error) {
-            console.error('Error creating branch:', error);
             throw error;
         }
     }
@@ -290,7 +277,6 @@ dist/
             await this.git.checkout(branchName);
         }
         catch (error) {
-            console.error('Error switching branch:', error);
             throw error;
         }
     }
@@ -305,7 +291,6 @@ dist/
             return { local, remote };
         }
         catch (error) {
-            console.error('Error getting branches:', error);
             throw error;
         }
     }

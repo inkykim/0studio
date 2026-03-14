@@ -29,7 +29,6 @@ export class ProjectService {
             lastModified: stats.mtime,
             isGitRepo
         };
-        console.log('Project opened:', projectInfo);
         return projectInfo;
     }
     /**
@@ -45,7 +44,6 @@ export class ProjectService {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const backupPath = join(backupDir, `${name}_${timestamp}.3dm`);
         copyFileSync(filePath, backupPath);
-        console.log(`Backup created: ${backupPath}`);
         return backupPath;
     }
     /**
@@ -88,7 +86,6 @@ export class ProjectService {
      */
     closeProject() {
         this.gitService = null;
-        console.log('Project closed');
     }
     /**
      * Validate that a file is a valid .3dm file
@@ -121,6 +118,5 @@ export class ProjectService {
     addToRecentProjects(filePath) {
         // This would typically update user preferences
         // Implementation depends on how you want to store preferences
-        console.log(`Added to recent projects: ${filePath}`);
     }
 }

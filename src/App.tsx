@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { RecentProjectsProvider } from "@/contexts/RecentProjectsContext";
 import { ModelProvider } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
+import { CloudSyncProvider } from "@/contexts/CloudSyncContext";
 import { PresenceProvider } from "@/contexts/PresenceContext";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
@@ -23,6 +24,7 @@ const App = () => (
         <HashRouter>
           <PresenceProvider>
             <VersionControlProvider>
+              <CloudSyncProvider>
               <ModelProvider>
                 <TooltipProvider>
                   <Toaster />
@@ -36,6 +38,7 @@ const App = () => (
                   </Routes>
                 </TooltipProvider>
               </ModelProvider>
+              </CloudSyncProvider>
             </VersionControlProvider>
           </PresenceProvider>
         </HashRouter>
