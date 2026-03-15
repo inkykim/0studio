@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { CommitPresenceAvatars } from '@/components/CommitPresenceAvatars';
 import { TeamPresencePanel } from '@/components/TeamPresencePanel';
+import { features } from '@/lib/features';
 
 const formatTimeAgo = (timestamp: number) => {
   const now = Date.now();
@@ -348,7 +349,7 @@ const BranchingTree = ({
                     {cloudSyncedCommitIds.has(node.commit.id) && (
                       <Cloud className="w-3 h-3 text-blue-400 shrink-0" title="Synced to cloud" />
                     )}
-                    <CommitPresenceAvatars commitId={node.commit.id} />
+                    {features.team && <CommitPresenceAvatars commitId={node.commit.id} />}
                     <span className="text-code text-xs text-muted-foreground shrink-0">
                       {versionLabel}
                     </span>
@@ -631,7 +632,7 @@ export const VersionControl = () => {
           )}
 
           {/* Team Presence */}
-          <TeamPresencePanel />
+          {features.team && <TeamPresencePanel />}
 
           {/* Version History */}
           <section>
