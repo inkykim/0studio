@@ -67,6 +67,22 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** No-op provider used when features.team is false */
+export function PresenceProviderNoop({ children }: { children: ReactNode }) {
+  return (
+    <PresenceContext.Provider value={{
+      onlineUsers: [],
+      myUserId: null,
+      updatePresenceCommit: async () => {},
+      updatePresenceStatus: async () => {},
+      joinProject: () => {},
+      leaveProject: () => {},
+    }}>
+      {children}
+    </PresenceContext.Provider>
+  );
+}
+
 export function usePresence() {
   const ctx = useContext(PresenceContext);
   if (!ctx) throw new Error('usePresence must be used inside PresenceProvider');

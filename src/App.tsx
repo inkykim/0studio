@@ -9,7 +9,8 @@ import { ModelProvider } from "@/contexts/ModelContext";
 import { VersionControlProvider } from "@/contexts/VersionControlContext";
 import { CloudSyncProvider } from "@/contexts/CloudSyncContext";
 import { GalleryProvider } from "@/contexts/GalleryContext";
-import { PresenceProvider } from "@/contexts/PresenceContext";
+import { PresenceProvider, PresenceProviderNoop } from "@/contexts/PresenceContext";
+import { features } from "@/lib/features";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
 import Checkout from "./pages/Checkout";
@@ -17,13 +18,14 @@ import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+const ActivePresenceProvider = features.team ? PresenceProvider : PresenceProviderNoop;
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <RecentProjectsProvider>
         <HashRouter>
-          <PresenceProvider>
+          <ActivePresenceProvider>
             <VersionControlProvider>
               <CloudSyncProvider>
               <GalleryProvider>
@@ -33,8 +35,17 @@ const App = () => (
                   <Sonner />
                   <Routes>
                     <Route path="/" element={<Index />} />
-                    <Route path="/dashboard" element={<Dashboard />} />
-                    <Route path="/checkout" element={<Checkout />} />
+                    {features.payments ? (
+                      <>
+                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/checkout" element={<Checkout />} />
+                      </>
+                    ) : (
+                      <>
+                        <Route path="/dashboard" element={<Index />} />
+                        <Route path="/checkout" element={<Index />} />
+                      </>
+                    )}
                     <Route path="/settings" element={<Settings />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
@@ -43,7 +54,7 @@ const App = () => (
               </GalleryProvider>
               </CloudSyncProvider>
             </VersionControlProvider>
-          </PresenceProvider>
+          </ActivePresenceProvider>
         </HashRouter>
       </RecentProjectsProvider>
     </AuthProvider>
