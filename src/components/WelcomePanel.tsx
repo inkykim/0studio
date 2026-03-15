@@ -15,6 +15,7 @@ import { useDesktopAPI } from "@/lib/desktop-api";
 import { projectAPI, CloudProject } from "@/lib/project-api";
 import { cloudSyncService, getLocalPathForProject, setCloudProjectPath, getSeenSharedProjectIds, markProjectAsSeen } from "@/lib/cloud-sync-service";
 import { toast } from "sonner";
+import { features } from "@/lib/features";
 
 /** Shorten path for display - replace /Users/username with ~ */
 function shortenPath(path: string): string {
@@ -54,7 +55,7 @@ export default function WelcomePanel({
 
   // Fetch shared projects when user is signed in
   useEffect(() => {
-    if (!signedIn || !user) return;
+    if (!features.team || !signedIn || !user) return;
 
     let cancelled = false;
     const fetchShared = async () => {
@@ -255,7 +256,7 @@ export default function WelcomePanel({
           </div>
 
           {/* Shared projects */}
-          {signedIn && (
+          {features.team && signedIn && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
