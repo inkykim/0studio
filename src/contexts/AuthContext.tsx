@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import { supabase } from '@/lib/supabase';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { toast } from 'sonner';
+import { features } from '@/lib/features';
 
 export type PaymentPlan = 'student' | 'enterprise' | null;
 
@@ -40,6 +41,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Returns true if user has active plan, false otherwise (for retry logic)
   // When keepOptimisticOnFailure is true, don't clear plan when API returns no plan (webhook may still be processing)
   const loadPaymentPlan = useCallback(async (keepOptimisticOnFailure = false): Promise<boolean> => {
+    if (!features.payments) {
+      setPaymentPlanState(null);
+      setPaymentPlanLoaded(true);
+      return false;
+    }
     if (!user || !session?.access_token) {
       setPaymentPlanState(null);
       setPaymentPlanLoaded(false);

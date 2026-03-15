@@ -35,6 +35,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { LayoutDashboard, LogOut, Settings } from 'lucide-react';
+import { features } from '@/lib/features';
 import { toast } from 'sonner'; 
 
 // Login form schema
@@ -468,10 +469,12 @@ export function UserMenu() {
           <Settings className="mr-2 h-4 w-4" />
           Settings
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate('/dashboard')}>
-          <LayoutDashboard className="mr-2 h-4 w-4" />
-          Plans & Billing
-        </DropdownMenuItem>
+        {features.payments && (
+          <DropdownMenuItem onClick={() => navigate('/dashboard')}>
+            <LayoutDashboard className="mr-2 h-4 w-4" />
+            Plans & Billing
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut} disabled={isLoading}>
           <LogOut className="mr-2 h-4 w-4" />
