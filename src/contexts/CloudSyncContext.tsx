@@ -6,6 +6,7 @@ import { projectAPI, type CloudProject } from "@/lib/project-api";
 import { supabase } from "@/lib/supabase";
 import { useVersionControl, type ModelCommit, type Branch } from "@/contexts/VersionControlContext";
 import { usePresence } from '@/contexts/PresenceContext';
+import { features } from '@/lib/features';
 
 interface CloudSyncContextType {
   cloudProject: CloudProject | null;
@@ -113,6 +114,7 @@ export const CloudSyncProvider: React.FC<CloudSyncProviderProps> = ({ children }
 
   // Join/leave presence channel when cloudProject changes
   useEffect(() => {
+    if (!features.team) return;
     if (cloudProject?.id) {
       joinProject(cloudProject.id);
     } else {
@@ -151,36 +153,32 @@ export const CloudSyncProvider: React.FC<CloudSyncProviderProps> = ({ children }
         .map(c => c.id)
         .filter(id => !cloudSyncedCommitIdsRef.current.has(id));
 
-      if (unsyncedCommitIds.length === 0) {
-        toast.info('All commits are already synced');
-        setIsCloudSyncing(false);
-        return;
-      }
+      if (unsyncedCommitIds.length > 0) {
+        toast.info(`Pushing ${unsyncedCommitIds.length} commit(s) to cloud...`);
 
-      toast.info(`Pushing ${unsyncedCommitIds.length} commit(s) to cloud...`);
+        // Upload each unsynced commit file
+        for (const commitId of unsyncedCommitIds) {
+          let fileBuffer: ArrayBuffer | null = null;
 
-      // Upload each unsynced commit file
-      for (const commitId of unsyncedCommitIds) {
-        let fileBuffer: ArrayBuffer | null = null;
-
-        // Try reading from local 0studio folder first
-        if (desktopAPI.isDesktop) {
-          fileBuffer = await desktopAPI.readCommitFile(currentModel, commitId);
-        }
-
-        // Fall back to in-memory buffer
-        if (!fileBuffer) {
-          const commit = commits.find(c => c.id === commitId);
-          if (commit?.fileBuffer) {
-            fileBuffer = commit.fileBuffer;
+          // Try reading from local 0studio folder first
+          if (desktopAPI.isDesktop) {
+            fileBuffer = await desktopAPI.readCommitFile(currentModel, commitId);
           }
-        }
 
-        if (!fileBuffer) {
-          continue;
-        }
+          // Fall back to in-memory buffer
+          if (!fileBuffer) {
+            const commit = commits.find(c => c.id === commitId);
+            if (commit?.fileBuffer) {
+              fileBuffer = commit.fileBuffer;
+            }
+          }
 
-        await cloudSyncService.pushCommitFile(cloudProject.id, commitId, fileBuffer);
+          if (!fileBuffer) {
+            continue;
+          }
+
+          await cloudSyncService.pushCommitFile(cloudProject.id, commitId, fileBuffer);
+        }
       }
 
       // Update synced IDs
@@ -188,7 +186,7 @@ export const CloudSyncProvider: React.FC<CloudSyncProviderProps> = ({ children }
       unsyncedCommitIds.forEach(id => newSynced.add(id));
       setCloudSyncedCommitIds(newSynced);
 
-      // Push updated tree.json with cloud-synced IDs
+      // Always push tree.json (even if no new commits, to ensure it exists in S3)
       const treeData: RemoteTreeData = {
         version: '1.0',
         activeBranchId,
@@ -219,7 +217,11 @@ export const CloudSyncProvider: React.FC<CloudSyncProviderProps> = ({ children }
       // Refresh status
       await refreshCloudStatus();
 
-      toast.success(`Pushed ${unsyncedCommitIds.length} commit(s) to cloud`);
+      if (unsyncedCommitIds.length > 0) {
+        toast.success(`Pushed ${unsyncedCommitIds.length} commit(s) to cloud`);
+      } else {
+        toast.success('Cloud sync updated');
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to push to cloud');
     } finally {

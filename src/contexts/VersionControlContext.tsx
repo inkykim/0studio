@@ -5,6 +5,7 @@ import { exportModelToBuffer } from "@/lib/rhino3dm-service";
 import { getFileBuffer } from "@/lib/commit-storage";
 import { toast } from "sonner";
 import { usePresence } from '@/contexts/PresenceContext';
+import { features } from '@/lib/features';
 
 interface ModelCommit {
   id: string;
@@ -328,7 +329,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         setCommits(treeData.commits);
         setActiveBranchId(treeData.activeBranchId);
         setCurrentCommitId(treeData.currentCommitId);
-        updatePresenceCommit(treeData.currentCommitId);
+        if (features.team) updatePresenceCommit(treeData.currentCommitId);
         setIsLoadingTree(false);
 
         return;
@@ -356,7 +357,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
         const latestCommit = persistedCommits[0];
         if (latestCommit) {
           setCurrentCommitId(latestCommit.id);
-          updatePresenceCommit(latestCommit.id);
+          if (features.team) updatePresenceCommit(latestCommit.id);
         }
       }
       
@@ -449,7 +450,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     };
     
     setCurrentCommitId(initialCommit.id);
-    updatePresenceCommit(initialCommit.id);
+    if (features.team) updatePresenceCommit(initialCommit.id);
 
     const updatedCommits = [initialCommit];
     setCommits(updatedCommits);
@@ -656,7 +657,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
       
       setCurrentCommitId(newCommit.id);
-      updatePresenceCommit(newCommit.id);
+      if (features.team) updatePresenceCommit(newCommit.id);
       setHasUnsavedChanges(false);
       setPulledCommitId(null); // Clear pulled commit after successful commit
 
@@ -740,7 +741,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
 
       setCurrentCommitId(commitId);
-      updatePresenceCommit(commitId);
+      if (features.team) updatePresenceCommit(commitId);
       setHasUnsavedChanges(false);
 
       return true;
@@ -827,7 +828,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
       }
 
       setCurrentCommitId(commitId);
-      updatePresenceCommit(commitId);
+      if (features.team) updatePresenceCommit(commitId);
       setPulledCommitId(commitId); // Track which commit was pulled for highlighting
       setHasUnsavedChanges(false);
       
@@ -882,7 +883,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     setModelName(null);
     setCommits([]);
     setCurrentCommitId(null);
-    updatePresenceCommit(null);
+    if (features.team) updatePresenceCommit(null);
     setHasUnsavedChanges(false);
     // Reset branching state
     setBranches([]);
@@ -970,7 +971,7 @@ export const VersionControlProvider: React.FC<VersionControlProviderProps> = ({ 
     
     setActiveBranchId(branchId);
     setCurrentCommitId(branch.headCommitId);
-    updatePresenceCommit(branch.headCommitId);
+    if (features.team) updatePresenceCommit(branch.headCommitId);
     setPulledCommitId(null);
   }, [branches, activeBranchId]);
 
