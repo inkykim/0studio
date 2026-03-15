@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   ArrowLeft,
+  Cloud,
   User,
   FolderOpen,
   UserPlus,
@@ -48,6 +49,7 @@ import { toast } from 'sonner';
 import { projectAPI, CloudProject, ProjectMemberWithEmail } from '@/lib/project-api';
 import { ProjectMemberRole } from '@/lib/supabase';
 import { cloudSyncService, RemoteTreeData } from '@/lib/cloud-sync-service';
+import { features } from '@/lib/features';
 
 // ============ Account Settings Tab ============
 function AccountSettings() {
@@ -95,6 +97,8 @@ function AccountSettings() {
         </div>
       </div>
 
+      {features.payments && (
+      <>
       <Separator />
 
       {/* Plan & Billing Section */}
@@ -140,6 +144,8 @@ function AccountSettings() {
           </div>
         </div>
       </div>
+      </>
+      )}
 
       <Separator />
 
@@ -296,7 +302,7 @@ function ProjectSettings() {
       };
       await cloudSyncService.pushTreeJson(project.id, treeData);
 
-      toast.success('Project enabled for collaboration');
+      toast.success(features.team ? 'Project enabled for collaboration' : 'Cloud sync enabled');
 
       // Reload members
       const memberData = await projectAPI.getProjectMembers(project.id);
@@ -398,8 +404,8 @@ function ProjectSettings() {
             </div>
             {cloudProject && (
               <Badge variant="secondary" className="shrink-0">
-                <Shield className="h-3 w-3 mr-1" />
-                Collaboration enabled
+                <Cloud className="h-3 w-3 mr-1" />
+                {features.team ? 'Collaboration enabled' : 'Cloud sync enabled'}
               </Badge>
             )}
           </div>
@@ -414,14 +420,18 @@ function ProjectSettings() {
       {/* Collaboration Section */}
       {!cloudProject ? (
         <div>
-          <h3 className="text-lg font-semibold mb-1">Collaboration</h3>
+          <h3 className="text-lg font-semibold mb-1">{features.team ? 'Collaboration' : 'Cloud Sync'}</h3>
           <p className="text-sm text-muted-foreground mb-4">
-            Enable collaboration to invite team members and manage permissions
+            {features.team
+              ? 'Enable collaboration to invite team members and manage permissions'
+              : 'Enable cloud sync to back up your versions to the cloud'}
           </p>
           <div className="p-6 rounded-lg border border-dashed bg-card/50 text-center">
-            <Users className="h-8 w-8 text-muted-foreground/40 mx-auto mb-3" />
+            <Cloud className="h-8 w-8 text-muted-foreground/40 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground mb-4">
-              Register this project in the cloud to start collaborating with your team.
+              {features.team
+                ? 'Register this project in the cloud to start collaborating with your team.'
+                : 'Register this project in the cloud to sync your versions.'}
             </p>
             <Button
               onClick={handleRegisterProject}
@@ -431,14 +441,16 @@ function ProjectSettings() {
               {isRegistering ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Shield className="h-4 w-4" />
+                <Cloud className="h-4 w-4" />
               )}
-              {isRegistering ? 'Enabling...' : 'Enable collaboration'}
+              {isRegistering ? 'Enabling...' : features.team ? 'Enable collaboration' : 'Enable cloud sync'}
             </Button>
           </div>
         </div>
       ) : (
         <>
+          {features.team && (
+          <>
           {/* Team Members Section */}
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -646,6 +658,8 @@ function ProjectSettings() {
               </div>
             </div>
           </div>
+          </>
+          )}
         </>
       )}
     </div>
